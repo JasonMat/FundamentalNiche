@@ -1,0 +1,981 @@
+---
+title: 'Defining, estimating and understanding the fundamental niches of complex animals in heterogeneous environments'
+author: AUTHOR. Jason Matthiopoulos
+date: "`r Sys.Date()`"
+output:
+  bookdown::pdf_document2:
+    toc: no
+  html_document:
+    df_print: paged
+  pdf_document:
+    toc: no
+  word_document: default
+fontsize: 12pt
+geometry: left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm
+header-includes:
+- \usepackage{setspace}
+- \usepackage{amsmath}
+- \usepackage{lineno}
+- \linenumbers
+keywords: pandoc, r markdown, knitr
+linestretch: 2
+link-citations: yes
+csl: ecol monogr.csl
+bibliography: niche.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Sparrow analysis, include=FALSE}
+##################################################
+###       1.DATA INPUT & INITIALISATION        ###
+##################################################
+library(geoR)
+library(plot3D)
+library(RColorBrewer)
+
+# Wipe-clean and working directory
+rm(list=ls())
+#setwd("~/OneDrive - University of Glasgow/2. Science/1. Papers/(2 In progress) Fundamental niche/Sparrow analysis")
+
+# Population data for 2016 (where available)
+N16<-c(NA,NA,6,NA,NA,NA,NA,NA,2,8,8,NA,NA,8,24,NA,NA,NA,NA,NA,12,4,2,NA,NA,NA,NA,NA,NA,10,10,4)
+
+# Population data for 2014 (where available)
+N14<-c(NA,NA,6,NA,NA,NA,NA,NA,6,2,6,NA,NA,2,2,NA,NA,NA,NA,NA,6,24,6,NA,NA,NA,NA,NA,NA,6,10,2)
+
+# Read habitat type and utilization dataframe
+sparrows<-read.csv("FinalSparrowData.csv") 
+
+# Initialization & libraries
+require(HATOPO) # Library available at https://github.com/JasonMat/HATOPO.git
+ls<-levels(sparrows$Colony) #The names of the sparrow colonies 
+controls<-20 #Number of zero points recorded per garden
+
+# Extracts dataset with zeroes only
+sparrowsO<-sparrows
+sparrowsO<-sparrowsO[sparrowsO$Aflag==1,] 
+
+##################################################
+###        2. SPECIFICATION OF MODELS          ###
+##################################################
+
+# These are the collected formulae for all the models 
+# needed for each of the iterations of 
+# cross validation.
+# Presented in this section are the best models
+# following comparison of the cross-validation scores.
+# A complete list of the model formulae compared 
+# and their cross validation-scores can be found at the
+# bottom of this file
+
+# Model formula for GFR
+formulaS<-Sparrow~Bush+Grass+Roof
+
+# Model formula for mean-field model 
+# (this will be used purely to extract 
+# the expectations of covariates in the 
+# mean field version of the population model,
+# below)
+formulaM<-Sparrow~Bush+Roof
+
+# Formula for spatial population model
+NformulaS<-N16~Bush+Grass+Roof+dens_dep:N14
+
+# Formula for meanfield population model
+NformulaM<-N16~M1_Bush+M1_Roof+N14
+
+##################################################
+###          3. HABITAT MODEL FITTING          ###
+##################################################
+
+# FITTING A GENERALIZED FUNCTIONAL RESPONSE MODEL 
+# See Matthiopoulos et al. 2011 (Ecology)
+# To fit a Generalized Functional Response model
+# the user is required to specify two components:
+# The first is a formula involving the main effects
+# (i.e., those variable that change at different spatial locations 
+# within a sampling instance)
+# See section 2, above for collected formulae
+# The second component of the GFR is a vector of text strings,
+# the names of the instance-specific covariates
+addexp=c("Colony.Size")
+
+# The gfrModel can now be fit to the sparrows data
+gfrModel<-gfr(formula=formulaS,data=sparrows, expFlag=sparrows$Aflag==1, family=binomial,order=1,addexp=addexp,
+              blockName="Colony", step=F)
+gfrMean<-gfr(formula=formulaM, data=sparrows, expFlag=sparrows$Aflag==1, family=binomial,order=1,addexp=addexp,
+             blockName="Colony", step=F)
+
+summary(gfrModel)
+summary(gfrModel$model)
+
+# Mixture approximation of habitat availability profiles for each colony
+fa<-favail(sparrowsO[,c(6,7,8,9,10,11)]+abs(runif(6*length(sparrowsO[,1]), 0, 0.00001)), blocking=sparrowsO$Colony, G=18, verbose=F)
+
+# Calculation of effective habitat preference coefficients, specific to each colony
+ga<-ga.gfr(gfrModel$model, gfrModel$expectations)
+
+
+##################################################
+###       4. POPULATION MODEL FITTING          ###
+##################################################
+
+# See Matthiopoulos et al. (2015) Ecological Monographs
+
+# Calculation of constructed covariate dataframe for the population model
+# Uses habitat availability approximation (fa)
+# and habitat utilization coefficients (ga)
+# Note that both fa and ga are colony-specific
+pop.frame<-pop.covariates(fa, ga)
+
+# Combining of the constructed covariates
+# (describing the effects of the habitat composition)
+# with the population data for each sampling instance
+datPop<-cbind("N16"=N16, 
+              "N14"=N14, gfrModel$expectations, gfrMean$expectations, pop.frame)
+
+
+
+# Fit the population model using constructed covariates for growth
+# and density dependence (See Matthiopoulos et al. 2015)
+spatial<-step(glm(NformulaS, family=poisson, offset=log(N14), data=datPop))
+
+# For comparison, a non-spatial version of the model is fitted
+# (using just the averages of covariates)
+meanfield<-glm(NformulaM, family=poisson, offset=log(N14), data=datPop)
+
+
+```
+
+
+**AFFILIATION: ** Institute of Biodiversity Animal Health and Comparative Medicine. University of Glasgow. Glasgow. G12 8QQ. Scotland. 
+
+**CORRESPONDENCE TO: ** jason.matthiopoulos@glasgow.ac.uk
+ 
+**ABSTRACT:**
+
+**During the past century, the fundamental niche, the complete set of environments that allow an individual, population, or species to persist, has shaped ecological thinking. It is a crucial concept connecting population dynamics, spatial ecology and evolutionary theory, and a prerequisite for predictive ecological models at a time of rapid environmental change. Yet, its properties have eluded quantification, particularly for mobile, cognitively complex organisms. These difficulties are mainly a result of the separation between niche theory and field data, and the dichotomy between environmental and geographical spaces. Here, I combine recent mathematical and statistical results linking habitats to population growth, to achieve a quantitative and intuitive understanding of the fundamental niches of animals. I trace the development of niche ideas from the early steps of ecology to their use in modern statistical and conservation practice. I examine, in particular, how animal mobility and behavior may blur the division between geographical and environmental space. I discuss how the fundamental models of population and spatial ecology lead to a concise mathematical equation for the fundamental niche of animals and demonstrate how fitness parameters can be understood and directly estimated by fitting this model simultaneously to data on population growth and spatial distributions. I illustrate these concepts and methods using both simulation and real animals and, in this way, confirm ideas that had been anticipated in the historical niche literature. Specifically, within traditionally defined environmental spaces, habitat heterogeneity and behavioral plasticity make the fundamental niche more complex and malleable than was historically envisaged. However, once examined in higher-dimensional environmental spaces, accounting for spatial heterogeneity, the niche is more predictable than recently suspected. This re-evaluation quantifies how organisms might buffer themselves from change by bending the boundaries of viable environmental space, and offers a framework for designing optimal habitat interventions to protect biodiversity or obstruct invasive species. It therefore promotes the fundamental niche as a key theoretical tool for understanding animal responses to changing environments and a central tool for environmental management. **
+
+
+**Running title:** The fundamental niche of animal species
+
+**Keywords:** Accessibility, E-space, Fitness, Habitat, Population ecology, Realized niche, Spatial Ecology, Species distribution models, Zero-niche paradox
+
+
+# Introduction
+
+The broader idea of the niche, the correspondence between an organism and its biotic or abiotic environment, is a cornerstone of ecology [@Mcinerny2012a; @ParentoniMartins2017; @Sales2021] and holds wider prominence, in areas as diverse as evolutionary theory [@Carscadden2020], cell biology [@Pocheville2015], anthropology [@DErrico2017], law [@Pedruski2016] and economics [@Tisdell2004]. Its scientific significance lies in its potential to unify the subfields of spatial ecology, population dynamics and evolution [@Slack2011]. Yet, despite its promise and prevalence in the literature [@Pedruski2016; @ParentoniMartins2017], the niche remains one of the most ambiguous terms in ecology [@Hurlbert1981; @ParentoniMartins2017; @Sales2021]. Perhaps, to achieve a robust definition of the niche, we must first aim for a convergence between the three ecological sub-fields that it adjoins. The formative work by Hutchinson [@Hutchinson1957; @Hutchinson1978] had set a course in this direction, by focusing on the fundamental niche, the part of environmental space that gives individuals of a species positive fitness and allows populations of the species to grow [@Chase2003; @Peterson2011]. This misleadingly simple definition implicitly connects the environmental attributes of space to the viability of populations and the fitness of their members [@Colwell1975], hence weaving together the necessary threads of spatial, population and evolutionary ecology. 
+
+However, much like a Platonic ideal [@ParentoniMartins2017], the fundamental niche is never observed directly. Instead, its various indirect manifestations, the realized niches, are observed in the distributions of species across landscapes [@Colwell1975; @Pulliam2000; @Zurell2012]. Realized niches differ from the fundamental niche because the correspondence between habitat suitability and species distributions is never exact [@Pulliam2000;@Colwell2009; @Cassini2011; @Godsoe2012a; @Diez2014; @Matthiopoulos2020b]. For example, species are often absent from suitable habitat due to dispersal limitations or historical artefacts. Conversely, species can be encountered in unsuitable habitat due to spillover of individuals from source habitats into neighboring sink habitats. Furthermore, the fundamental niche may include habitats that are not currently present anywhere in geographical space, so it is not possible to know by direct observation that such habitats would be suitable.
+
+This conspicuous mismatch between the fundamental niche and observed species distributions has led to recurrent debate about its utility and, even, calls for its abandonment [@Chesson1991a; @Chase2003; @Araujo2006; @Mcinerny2012a; @Mcinerny2012b; @Mcinerny2012c; @Angilletta2019; @Hubbell2004]. Suggestions for a more pragmatic approach [@Mcinerny2012c] argue that the niche concept is purely a conversational device and that an unambiguous understanding of the term is not a prerequisite for modeling the associations between species and habitats. However, this may be setting a low bar for the science of ecology [@ParentoniMartins2017] because, although the fundamental niche is not essential for building *descriptive* models of where species are today, it is indispensable for *predicting* where they could occur [@Yates2018; @Zurell2012]. At a time of rapid environmental change, describing the status-quo with distribution models is not enough, and the scarcity of predictive, transferable models is becoming an urgent problem for conservation and pest management [@Mouquet2015]. Perhaps that is why anticipatory studies on species' global ranges, invasion potential, critical habitat and fine-scale habitat suitability, are often discussed in terms of individual *fitness* and population *viability*, the defining notions of the fundamental niche [@Warren2012]. A more formal understanding of the fundamental niche would crystallize these concepts and help us develop predictive models that can yield robust forecasts and biological insights about species distributions, range expansions and extinctions [@Pulliam2000; @Kearney2004; @Soberon2014; @Yates2018; @Soberon2020]. Our undisputed need to understand the viability of species in changing landscapes [@Araujo2006; @Godsoe2017] means that "*the niche is here to stay*" [@Soberon2014]. 
+
+A considerable body of conceptual and set-theoretic work has detailed the distinctions between habitat suitability and observed species distributions [@Chase2003; @Soberon2005; @Holt2009; @Soberon2007; @Soberon2009; @Peterson2011; @Godsoe2010a]. This increasing clarity must now be converted into more utilitarian definitions of the fundamental niche that can be estimated from data and used for real applications [@Araujo2006; @Jimenez2021]. To achieve this utility we need to address three knowledge gaps. 
+
+First, we require a general mathematical framework linking the fundamental to the realized niche. That is not to say that we have a shortage of "niche models" in the literature. Unfortunately, the indiscriminate use of the term "niche modeling", often in *lieu* of species distribution modeling (SDM) has been counter-productive [@Warren2012; @McInerny2013; @Soberon2014]. SDMs are methods fitted to abundance/occurrence data and hence best-suited to mapping the density of populations at pseudo-equilibrium (i.e., to model the realized niche - see Section 2 in @Guisan2000). They can only ever quantify the intrinsic growth rates of populations (i.e., the fundamental niche - @Pagel2011) under unrealistically strict conditions [@Matthiopoulos2020b]. As long as the realized and fundamental niches are casually confused in this way, concepts that depend on them will also remain confused [@Whittaker1973; @Soberon2009; @Elith2009; @ParentoniMartins2017], endangering accurate ecological inference and prediction.
+
+Second, we have few statistical frameworks for estimating the fundamental niche empirically [@Pulliam2000; @Blonder2018; @Godsoe2017; @Mcinerny2012a; @Jimenez2019], and none that specifically refer to vagile and selective animals. The batch of statistical methods typically named "niche-models" [e.g., @Hirzel2003; @Thuiller2004; @Rotenberry2006; @Broennimann2012; @Drake2019] use presence-only data as a proxy for population viability. Their premise is that if a species is found at a particular habitat, then the habitat must belong to its fundamental niche. This assumption will be untrue for sink populations. Furthermore, the interpretation of vacant habitats makes all the difference for our inferences about the niche. Is a habitat ostensibly unoccupied because the species has not yet colonized it, because it does not physically exist so as to be colonized, or because our surveys have not actively looked for the species in that habitat? We need to know, not only what habitats the animals are found in, but also what options were accessible to them, and how well they are doing there. Presence-only methods are statistically weak, estimating niche-related objects that are found "*at some unspecified point along a continuum between the fundamental and the realized niche*" [@Soberon2005; @Jimenez-Valverde2008; @Colwell2009; @Peterson2011]. Niche models that examine abundance or occupancy without corresponding measures of survey effort, habitat availability and population growth [@Aldridge2008; @DeCesare2014], are of limited utility in an explanatory or predictive capacity [@Pagel2011; @Schurr2012]. 
+
+Third, the above two gaps have limited our intuition about the shape and boundaries of the fundamental niche. Since its inception, it has been imagined as a bounded and convex hypervolume in $n$-dimensional environmental space [@Hutchinson1957; @Whittaker1973; @Holt1987; @Malanson1997; @Blonder2014; @Blonder2018]. This image stems from the original descriptions of the fundamental niche in terms of morphological or physiological tolerances [e.g., temperature envelopes - @Kearney2004] that define simple ranges along each niche dimension. However, it is becoming apparent that the structure of fundamental niches may be more complex [@Blonder2016; @Soberon2020]. In particular, it has recently been postulated that environmental heterogeneity and phenotypic plasticity make the boundary of the fundamental niche fuzzy [@Angilletta2019]. This may be particularly the case for organisms that can sense heterogeneity and move selectively between different habitats.
+
+Here, I address all three of these challenges. I synthesize recent theoretical results into a general, concise expression for the boundary of the niche that is both mathematically tractable and statistically estimable from field data. I illustrate this statistical approach using both hypothetical scenarios and wildlife data. Using these motivating examples, I review our current intuition about the fundamental niche. By doing so, I suggest how to estimate the extent of endurance of plastic organisms, living in heterogeneous environments, in apparently inviable regions of niche space. Finally, I discuss how this framework can be extended and how this knowledge might help us resolve challenging human-wildlife conflicts.
+
+
+# From *G*-spaces to *E*-spaces and back again
+The separation of physical from environmental space, known as Hutchinson's duality [@Colwell2009], was a source of considerable clarity in the golden age of niche theory [@Pocheville2015; @Sales2021], but has increasingly become a source of confusion as niche concepts have moved from the hypothetical realm, closer to field data and statistical methodology [@Mcinerny2012a; @ParentoniMartins2017; @Sales2021]. A solid foundation for niche theory requires us to clearly define these spaces and recognize the relationship between them. 
+
+Geographical space (*G*-space) comprises the three physical dimensions of latitude, longitude and altitude. A location $\mathbf{s}=(\text{Lat,Lon,Alt})$ in *G*-space may have $n$ characteristics, such as scene-setting conditions (e.g., aspects of geomorphology, climate and soil composition), resources (e.g., amount of food, number of breeding sites) or risks (e.g., exposure to predators or pollution). These *n* variables form the dimensions of environmental space (*E*-space). Since Hutchinson [@Hutchinson1957], this is also known as "*niche space*", because he envisaged the fundamental and realized niches as subsets of *E*-space. 
+
+A point $\mathbf{x}=(x_1,...,x_n)$ in *E*-space uniquely defines a local environment, or habitat [@Hall1997; @Aarts2008; @Matthiopoulos2011]. Habitat availability refers to the composition of the environment that is accessible to an individual or group. Quantifying the availability $f_\mathbf{x}$ of a particular habitat $\mathbf{x}$ depends on how finely habitats are classified and how accessible they are from the position of the study organisms [@Matthiopoulos2003a; @Martin2008; @Matthiopoulos2020]. We can initially think of availability $f_\mathbf{x}$ as the proportion of area of the accessible range of the individual or group, occupied by habitat $\mathbf{x}$. This requires us to think of habitats as finite volumes (rather than infinitesimal points) in *E*-space, so that it makes sense to measure the area they occupy in *G*-space (if habitats were classified with infinite precision, then the area occupied by each would be zero). It also assumes, that any point in *G*-space is either fully or not at all accessible to the organism. However, neither of these assumptions are necessary if we think of availability as a probability density. Relaxing these assumptions leads naturally to infinitesimal definitions of habitat where availability decays smoothly with decreasing accessibility [@Matthiopoulos2020]. Therefore, the availability scalar field $\mathbf{f}$ is a probability density function such that $\int_Ef_\mathbf{x} d\mathbf x=1$.
+
+Several of the published approaches to spatial heterogeneity have used convolutions of spatial kernels (e.g., @Snyder2004; @Chesson2005; @Jongejans2008), or reaction-diffusion formulations (e.g., @Nisbet2004Modelling; @Skellam1951). These are all formulations in *G*-space that capture proximity in an explicitly spatial way. Spatial autocorrelation in covariates and limitations in mobility mean that geographical proximity and environmental proximity are connected (similar habitats are accessible from the current habitat $\mathbf x(\mathbf s)$ at position $\mathbf x$). However, the complexity of objects in geographical space is commonly much higher than the complexity in environmental space (see Fig. 1 in @Matthiopoulos2020). Exploiting this property, the formulations of accessibility used here (developed in @Matthiopoulos2020) aim to simplify the treatment of proximity by examining neighborhoods in *E*-space. So, it is worth stressing that, the integrals and definitions of usage and availability in the ensuing sections are over *E*-space, not *G*-space.
+
+
+```{r Espace, echo=FALSE, fig.height=5.5, fig.width=5.5, cache=TRUE, fig.cap="Illustration of Geographical (top row) and Environmental (bottom row) spaces. A *G*-space is a landscape, here mapped in the two dimensions of Easting and Northing. Two such landscapes (plates a & b) were created by mixing similar total amounts of three environmental variables. Each enviromental variable is represented by a primary color red, green or blue. As different intensities of the three primary colors overlap locally in a & b, they create a wide variety of mixture colors, each symbolizing a different habitat. The three axes of *E*-space (plates c & d) represent these three environmental variables (primary colours) and each mixed color in *G*-space (a unique habitat type) is a point in the 3D *E*-space. Recording a dot at a particular point in *E*-space implies that the corresponding habitat can be found within the landscape in *G*-space. The intensity of purple colour in *E*-spaces c & d represents the availability of each habitat type, the frequency with which this exact combination of environmental values occurs in each of the two landscapes above. The more spherical shape of the availability cloud in plate c, as compared to plate d, is entirely the result of chance in the generation of the original landscapes. More symmetric clouds than c, and more irregular clouds than d are possible, from mixing the same overall amounts of the three primary colours."}
+
+# Generate three environmental layers by Gaussian random fields
+set.seed(3)
+par(mfcol=c(2,2),mar=c(1,1,1,1.5))
+X1 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1, 200), messages=F)
+x1<-matrix(X1$data, 100,100); x1<-x1-min(x1); x1<-x1/max(x1)
+X2 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1, 200), messages=F)
+x2<-matrix(X2$data, 100,100); x2<-x2-min(x2); x2<-x2/max(x2)
+X3 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1, 200), messages=F)
+x3<-matrix(X3$data, 100,100); x3<-x3-min(x3); x3<-x3/max(x3)
+
+# Create synthetic color image combining the three layers
+colMix <- rgb(x1, x2, x3)
+
+plot(expand.grid(1:100,1:100),col=colMix,cex=1,pch=15, axes=FALSE)
+mtext(side = 1, text = "Easting", line = 0)
+mtext(side = 2, text = "Northing", line = 0)
+mtext(side = 3, text = "a", line = 0, font=2)
+# Create habitat availability plot in 3D E-space
+
+l<-30
+x1d<-ceiling(c(x1)*l); x2d<-ceiling(c(x2)*l); x3d<-ceiling(c(x3)*l)
+fil<-array(0, dim=c(l,l,l))
+for(i in 1:length(x1d)) {fil[x1d[i],x2d[i],x3d[i]]<-fil[x1d[i],x2d[i],x3d[i]]+1}
+
+# Visualize habitat availability
+ptsMix<-expand.grid(1:l,1:l,1:l)
+scatter3D(ptsMix[,1],ptsMix[,2],ptsMix[,3], pch=19,phi=5, theta=50,bty ="g", cex=c(fil)/6,xlim=c(0,l), ylim=c(0,l),zlim=c(0,l), xlab="Red",ylab="Green",zlab="Blue",colvar=c(fil), colkey=TRUE, col=rev(brewer.pal(5, "Purples")))
+mtext(side = 3, text = "c", line = 0, font=2)
+
+###################################
+
+X1 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1,200), messages=F)
+x1<-matrix(X1$data, 100,100); x1<-x1-min(x1); x1<-x1/max(x1)
+X2 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1, 200), messages=F)
+x2<-matrix(X2$data, 100,100); x2<-x2-min(x2); x2<-x2/max(x2)
+X3 <- grf(100, grid="reg", nx=100, ny=100, xlims=c(1,100), ylims=c(1,100), cov.pars=c(1, 200), messages=F)
+x3<-matrix(X3$data, 100,100); x3<-x3-min(x3); x3<-x3/max(x3)
+
+# Create synthetic color image combining the three layers
+colMix <- rgb(x1, x2, x3)
+plot(expand.grid(1:100,1:100),col=colMix,cex=1,pch=15, axes=FALSE)
+mtext(side = 1, text = "Easting", line = 0)
+mtext(side = 2, text = "Northing", line = 0)
+mtext(side = 3, text = "b", line = 0, font=2)
+# Create habitat availability plot in 3D E-space
+
+x1d<-ceiling(c(x1)*l); x2d<-ceiling(c(x2)*l); x3d<-ceiling(c(x3)*l)
+fil<-array(0, dim=c(l,l,l))
+for(i in 1:length(x1d)) {fil[x1d[i],x2d[i],x3d[i]]<-fil[x1d[i],x2d[i],x3d[i]]+1}
+
+# Visualize habitat availability
+ptsMix<-expand.grid(1:l,1:l,1:l)
+scatter3D(ptsMix[,1],ptsMix[,2],ptsMix[,3], pch=19,phi=5, theta=50,bty ="g", cex=c(fil)/6,xlim=c(0,l), ylim=c(0,l),zlim=c(0,l), xlab="Red",ylab="Green",zlab="Blue",colvar=c(fil), colkey=TRUE, col=rev(brewer.pal(5, "Purples")))
+mtext(side = 3, text = "d", line = 0, font=2)
+
+
+par(mfrow=c(1,1),mar=c(5, 4, 4, 2) + 0.1)
+
+
+```
+
+Fig. \@ref(fig:Espace) visualizes the correspondence between *G* and *E* spaces and prompts three important points. First, several very different landscapes can be constructed by re-arranging the same ingredients (e.g., total amounts of resources) in *G*-space (e.g., compare Figs \@ref(fig:Espace)a and b). Second, the shape of habitat availability clouds in *E*-space can be very complex [@Soberon2009], even including discontinuities and holes [@Blonder2016]. This makes it difficult to approximate realistic availability clouds with multivariate, but unimodal, Gaussian functions in *E*-space [such as those in @Austin1985; @Malanson1997; @Jimenez2019; @Jimenez2021]. Third, availability clouds in Hutchinson's *E*-space hold no information about the spatial contiguity of habitats, and are therefore unable to communicate the *geographical context* in which an organism finds itself. Hence, although only one *E*-cloud can be constructed from a given *G*-landscape, infinite landscapes can be constructed from an availability cloud in *E*-space [@Colwell2009; @Matthiopoulos2020] (i.e., the transition from *G* to *E* is irreversible). Despite this limitation, *E*-spaces are more suitable as the domain of concise mathematical models for habitat availability, habitat preference and the fundamental niche, because each habitat occurs exactly once as a point in *E*-space, whereas it can occur at multiple locations of *G*-space [see Fig. 1 in @Matthiopoulos2020]. 
+
+Traditionally [@Hutchinson1957; @Whittaker1973; @Holt1987; @Malanson1997; @Blonder2014; @Blonder2018], niches have been imagined as compact subsets of *E*-space, objects not dissimilar to the 3D cloud in Fig. \@ref(fig:Espace)c. Indeed, if an animal inhabiting Fig. \@ref(fig:Espace)a divided its time equally between all points of that landscape, its realized niche would coincide with Fig. \@ref(fig:Espace)c. However, there has always been confusion about whether to think of the fundamental niche as a subset of *E*-space or as a place, in *G*-space [@Whittaker1973]. This lingering confusion stems from the tenable notion that a point in *E*-space should not be considered in isolation from its geographical context [@Angilletta2019]. For instance, a situation not currently modeled by the niche literature is that animals are routinely able to survive in niche spaces where no *single* point is sufficient for their survival and reproduction [@Holt2009]. I will tentatively call this the "zero-niche paradox". Often, vital resources are mutually exclusive in space (e.g., at a fine spatial scale, water holes and grazing land cannot coincide), and vagile animals have to perform short commutes or longer-range migrations to satisfy all their life-history requirements [@Dennis2010]. By moving across heterogeneous landscapes, animals can experience different types of habitats, and by actively selecting to use some over others, they demonstrate high levels of behavioral plasticity [@Holt2009]. If we imagine that the two landscapes in plates a & b of Fig. \@ref(fig:Espace) happen to be the home ranges of two animals from the same species, then habitat suitability and the resulting viability of these two individuals may differ, even though they have access to the same average amounts of resources. So, we must consider the animals' fitness in the light of their *entire* environmental profile (i.e., the whole clouds in Figs \@ref(fig:Espace)c, d), not merely any single point in *E*-space.
+
+It may be argued that this is a problem of scale [@McGill2010; @Jackson2015] and that summarizing (for instance, averaging) the environmental variables at spatial resolutions comparable to the home range of individuals [@Cassini2011] may restore the concept of the fundamental niche to its classic form (i.e., mapping viability to single points in *E*-space). However, home ranges with the same average habitat composition can be very different indeed and heterogeneity around the average composition offers opportunities that can turn negative fitness into positive. Spatial and temporal heterogeneity will generally affect the viability of an organism [@Holt2009; @McLoughlin2006; @Morales2010] so habitat homogeneity, artificially created by averaging environmental variables at coarse spatial scales, prevents us from correctly representing species responses to habitat. 
+
+It is important therefore to ask whether the existence of such heterogeneities, and the complex responses of animals to them, require us to modify our intuitive understanding of the fundamental niche. Does the ubiquitous fact that animals can move and choose between habitats to meet their needs matter for the size, shape and predictability of their fundamental niche? Below, I conclude that the answer is yes, even in very low-dimensional environmental spaces, using the most rudimentary levels of environmental heterogeneity. 
+
+
+# Population dynamics in *E*-space
+The fundamental niche has, at its heart, the concept of population viability, a core subject in population dynamics. So, it is useful to consider the niche from the viewpoint of population dynamics, defined within niche space (that is, a model that captures spatial heterogeneity not explicitly, as a landscape in *G*-space, but implicitly through the availability of different habitats to a species in *E*-space). At the same time, not all aspects of population dynamics will be relevant to the definition of the niche, so it is useful to simplify the full population dynamics approach to a minimal set of necessary features. The full model presented in this section serves as an illustration of the assumptions made to arrive at the niche, rather than a key objective of the analysis presented later. 
+
+To begin with, consider a population of total size $N_t$ living in an expansive and heterogeneous landscape of area $A$, much larger than the range of any single population member. Within each unit of habitat ($\mathbf x$), population size ($N_{\mathbf x, t}$) can grow at a rate ($r_\mathbf x(N_{\mathbf x, t})$) characteristic of that habitat, and the habitats around it. The local growth rate will also be dependent on population density in that habitat. The change in numbers within a habitat unit will also be affected by long-range immigration and emigration between habitats. A model in discrete time, defined in the corresponding *E*-space of that landscape might take the following form:
+
+\begin{equation}
+\ N_{t+1}= A\int_E{\left\{\underbrace{ N_{\mathbf x,t} f_\mathbf x r_\mathbf x(N_{\mathbf x, t})}_\text{Growth}+\underbrace{f_{\mathbf x}\int_E g_{\mathbf y \rightarrow \mathbf x} N_{\mathbf y,t} f_\mathbf y d\mathbf y}_\text{Immigration} -\underbrace{ N_{\mathbf x,t} f_\mathbf x\int_E g_{\mathbf x \rightarrow \mathbf y} f_{\mathbf y} d\mathbf y}_\text{Emigration}\right\} d\mathbf{x}}
+\label{eq:generalModel}
+\end{equation}
+
+
+where $g_{\mathbf y \rightarrow \mathbf x}$ defines the per-capita flux from a unit of habitat $\mathbf y$ to one unit of habitat $\mathbf x$. This flux term describes the connectivity between different habitat types and must therefore be determined from the statistical properties of the environment (i.e., spatial auto- and cross-correlation of habitat characteristics) as well as the mobility of the species.
+
+Although the functions $r_\mathbf x$ and $g_{\mathbf y \rightarrow \mathbf x}$ are not yet defined, we can make the following simplifying assumptions about this model that ultimately will form part of the definition of the niche. So, for the purposes of defining the niche:
+
+1. The spatial scale over which the niche is described should not be the arbitrary spatial scale enclosing a population because different population members may experience very different conditions. It should instead be comparable to the range of the individual member of the species. This implies a simpler model of the form
+
+\begin{equation}
+\ N_{\mathbf x, t+1}= N_{\mathbf x,t} r_\mathbf x(N_{\mathbf x, t})+\int_E g_{\mathbf y \rightarrow \mathbf x} N_{\mathbf y,t} f_\mathbf y d\mathbf y - N_{\mathbf x,t} \int_E g_{\mathbf x \rightarrow \mathbf y} f_{\mathbf y} d\mathbf y
+\label{eq:Simpl01Model}
+\end{equation}
+
+2. We are interested in the ability of a species to establish in a particular habitat. Therefore, although the local growth rate $r_\mathbf x$ will eventually be influenced by crowding, the niche must be considered for very small population sizes, such that the local growth rate of the population, corresponds to its intrinsic growth rate $r_\mathbf x$:
+
+
+\begin{equation}
+\ N_{\mathbf x, t+1}= N_{\mathbf x,t} r_\mathbf x+\int_E g_{\mathbf y \rightarrow \mathbf x} N_{\mathbf y,t} f_\mathbf y d\mathbf y - N_{\mathbf x,t} \int_E g_{\mathbf x \rightarrow \mathbf y} f_{\mathbf y} d\mathbf y
+\label{eq:Simpl02Model}
+\end{equation}
+
+3. Similarly, habitats that are sufficiently populated, such that the numbers occupying them are markedly affected by loss through emigration are referring to crowded conditions, that do not pertain to the ability of a habitat to sustain a species.
+
+4. Although long-range immigration can sustain animals in habitats that would not be viable in isolation, the fundamental niche should not include such sink habitats. Conversely, although there will generally be regions in space that have not been accessed by a species, even if they are suitable, we must assume that all habitats that can support a species have received colonization attempts.
+
+ These assumptions imply a much simpler model, where the interest is in the definition of the intrinsic growth rate of a species at, or in the neighborhood of any given habitat,
+
+\begin{equation}
+\ N_{\mathbf x, t+1}= N_{\mathbf x,t} r_\mathbf x
+\label{eq:Simpl03Model}
+\end{equation}
+
+
+# An initial definition of the fundamental niche
+For the purposes of species- or population-level models, the concept of absolute individual fitness (as a characteristic of a genotype or phenotype) is often generalized to populations, by linking the average fitness $F$ across individuals to population growth, using general models of the form [e.g., eq. (3.9) in @Turchin2003]
+
+\begin{equation}
+\frac{N_{t+1}}{N_t}=\exp(F(\mathbf{f},\mathbf{N}_t))
+\label{eq:PopRate}
+\end{equation}
+
+in which the population’s fitness is determined by the composition of the environment ($\mathbf{f}$) and density dependent influences ($\mathbf{N}_t=\{N_t,N_{t-1},...\}$). Eq. (\ref{eq:PopRate}) is merely a deterministic model for the mean of a distribution of individual fitnesses within a population. This ecological use of average fitness has been extensively discussed in the literature [@Stenseth1983; @Nur1984; @Murray1985; @Nur1987; @Ollason1991] and eq. (\ref{eq:PopRate}) has a long history of use in evolutionary models [@Fisher1930; @Lande1982; @Roff2008a]. It also specifies a mathematical link between the environment of a species and its ability to grow, hence allowing us to formalize the concept of the niche at a species level, rather than the level of the individual. 
+
+Hutchinson envisaged the fundamental niche of a species as the set of points $\mathbf{x}$ in *E*-space yielding non-negative intrinsic population growth [@Chase2003; @Soberon2007; @Peterson2011; @Godsoe2017], allowing species members to invade and occupy these habitats [@Peterson2011], in the absence of interspecific or intraspecific competition. Hence, each point in *E*-space was assumed to map to a single value of fitness for a founder (i.e., density-independent) population. We can obtain an expression that adheres to this definition of the fundamental niche by simplifying eq. (\ref{eq:PopRate}) in two ways. First, we must specify it to near-zero population densities ($\mathbf{N}_t\approx\mathbf{0}$). A species at high densities may have zero or negative growth due to crowding effects, which is why population growth rates in high-density scenarios are not a good indicator of viability [@McLoughlin2010]. Arguably, density dependence may also affect the species at low densities, if it is subject to Allee effects [@Courchamp1999] and further work will be required to extend Hutchinson's definition to allow for these [@Holt2004; @Holt2009]. The second simplification of eq. (\ref{eq:PopRate}) is to specify it to the fitness generated by a single habitat (i.e., to map fitness to a single point $\mathbf{x}$ in *E*-space).Under the above two simplifications, growth rate will be (compare with eq. (\ref{eq:Simpl03Model})):
+
+\begin{equation}
+\frac{N_{t+1}}{N_t}=\exp(F(\mathbf{x}))
+\label{eq:PopRateToFitnessM}
+\end{equation}
+
+Then, Hutchinson's *fundamental niche* is a subset of *E*-space defined as
+
+\begin{equation}
+\ E_I=\{\mathbf{x}:F(\mathbf{x})\geq 0\}
+\label{eq:NicheSetM}
+\end{equation}
+
+and the niche boundary is obtained by setting $F(\mathbf{x})=0$ .
+
+The utility of this mathematical definition for practical applications (such as animal conservation) is limited. First, the fitness of most mobile animals will be determined by not one, but several different habitats within accessible *G*-space. The above expression is written in *E*-space which, as mentioned earlier cannot easily store the geographical proximity between habitats [@Angilletta2019]. Second, fitness and the availability of accessible habitats need to be written as mathematical functions so that their parameters can be estimated in real-world situations. For these reasons, the above definition is far removed from the spatial data (e.g., telemetry, transect survey, remote sensing) that quantify habitat availability and habitat use in real systems.
+
+# Individual v population niches
+
+The fundamental niche is a concept usually associated with entire species but its definition and subsequent estimation depend on how individuals experience and respond to their environment [@Carscadden2020]. Scaling up from the individual to the population niche requires us to think of four aspects of biology:
+
+1. Individual variation: Phenotypic variation between individuals results in differences in their tolerances of environmental extremes. In effect, the niche of a species is the convolution between individual tolerances and between-individual variation [@Roughgarden1974]. The concept of fitness at the population level can be thought of as the average of individual fitnesses and the variation around this average is the material on which natural selection operates. Although, in this paper I refer to a single measure of (average) fitness for the population, a genuine consideration of niche evolution would require the mathematical framework to be extended to include individual variation [@Carlson2021]. 
+
+2. Movement ecology: Although populations may be distributed across a landscape, not all population members will be able to experience the full distribution of environmental variables. Given that a population is made up of individuals, possibly residing at different parts of space, movement constraints deserve to be taken into consideration in scaling up from individuals to populations. 
+
+
+3. Spatial ecology: Environmental variables have non-uniform distributions, and different variables are characterized by unique levels of autocorrelation and cross-correlation. Therefore, each part of the landscape (within an individual's mobility constraints) will present a unique habitat composition. The fitness of a population will be the result of these unique experiences by its individual population members. 
+
+4. Behavioral ecology: Within the constraints of their genetic makeup, mobility and position in the landscape, individuals will have unique behavioral responses to how they exploit their environment. Habitat selection is an important driver of individual fitness and the emergent population fitness will be shaped by it. 
+
+
+# Animal mobility and the niche
+The main challenge in formalizing the niche concept for animals, is that they are predominantly mobile organisms and that, even primitive animals have perception and cognitive control of their movements, such that they can actively select which habitats to use. Therefore, viability may not only depend on a single habitat $\mathbf{x}$ (see zero-niche paradox, above). Spatial heterogeneity may offer animals different options within their accessible space. To associate fitness with a given habitat $\mathbf{x}$, we need to view it in the context of its surrounding habitats. For that purpose, we may interpret $\mathbf{x}$ as the central vantage point from which an animal perceives this heterogeneous landscape. For example, $\mathbf{x}$ may be the habitat characterizing the current location of a nomad in the landscape, or the habitat at the centroid of the home range of a central-place forager. Alternatively, it may be a statistical summary of an animal's surroundings, such as the average habitat within its home range. Ultimately however, $\mathbf{x}$ is a reference habitat in *E*-space, around which we want to evaluate viability, in order to determine whether $\mathbf{x}$ belongs to the fundamental niche, or not. Note that although this reasoning adds considerable realism to our existing models of habitat selection, in the future it would need to be further expanded to include migratory animals whose interannual viability relies on habitats separated by very large distances [@Carscadden2020]. 
+
+To quantify what habitats an animal experiences, we must therefore consider just how mobile it is and what habitats are likely to be available to it from its position. From the perspective of *E*-space, mobility determines the capacity of an organism to reach and use different habitats $\mathbf{z}$ given that it is currently occupying a particular habitat $\mathbf{x}$, but this effect can only be captured by considering the proximity between habitats in *G*-space, for a particular landscape. If, at a geographical location $\mathbf{s}$, an animal encounters the habitat $\mathbf{x}$, we may be able to anticipate what types of habitat are likely to be available to it within its accessible neighborhood, given the size of that neighborhood and the characteristic spatial autocorrelation of habitats [@Matthiopoulos2003a; @Martin2008; @Barve2011; @Matthiopoulos2020]. Therefore, an important aspect of the fitness $F(\mathbf{x})$ attained by an organism when it is located at a particular habitat $\mathbf{x}$, at a set of spatial coordinates $\mathbf{s}$, is that it depends on context [@Angilletta2019], i.e., the habitat composition in the neighborhood of those coordinates. Because of this, it is necessary to distinguish between the context-specific version of fitness $F(\mathbf{x})$ and the context-independent fitness contribution of a single habitat, denoted here by $F_\mathbf{x}$, and defined as the long-tern fitness characterizing a completely *sessile* individual constrained within habitat $\mathbf{x}$. For example, during the sessile stages of some animals (e.g., porifera and anthozoa), we can assume that $F(\mathbf{x})=F_\mathbf{x}$. Similarly, when the mobility of an animal is small (e.g., echinoderms) compared to the heterogeneity of their environment, we can assume $F(\mathbf{x}) \approx F_\mathbf{x}$, because animals may not be able to move fast enough to exit a particular habitat. Context-specific usage, denoted by $u_{\mathbf{z}|\mathbf{x}}$ is defined as the expected proportion of usage of a particular habitat $\mathbf{z}$, from a reference habitat $\mathbf{x}$. Context-specific usage is a function of both habitat availability and preference (as will be seen below) and can help express a relationship between context-specific and context-independent fitness: 
+
+\begin{equation}
+\ F(\mathbf{x})=\int_E{F_\mathbf{z} u_{\mathbf{z}|\mathbf{x}} d\mathbf{z}}
+\label{eq:FXtoFx}
+\end{equation}
+
+The integral gives overall fitness $F(\mathbf{x})$ at $\mathbf{x}$ as the usage-weighted average of habitat-specific fitness contributions $F_\mathbf{z}$, of all habitats across *E*-space. I consider context-independent fitness and context-specific usage (the two components of the integrand), in turn.
+
+context-independent fitness can be adequately represented by quadratic polynomials of habitat variables [@Austin2007; @Matthiopoulos2015]. 
+
+\begin{equation}
+\ F_{\mathbf{x}}= \sum_{k=1}^n\sum_{r=0}^2{\beta_{r,k} x_k^r}
+\label{eq:FitnessPredictor}
+\end{equation}
+
+where the first sum is over $n$ habitat variables and the second sum generates the quadratic polynomials with terms of order $r$.
+
+Here, the values of the beta coefficients will depend on the ecological nature of the $k^{th}$ environmental variable. In particular, linear (hence, monotonic) terms may be used to describe responses to environmental resources ($\beta_{1,k} >0, \beta_{2,k} = 0$) and risks ($\beta_{1,k} <0, \beta_{2,k} = 0$) while downward-pointing parabolas can describe peaks in the responses to conditions ($\beta_{1,k} >0, \beta_{2,k} < 0$). Two distinct components of fitness have been considered [@Matthiopoulos2015], with and without the effect of density dependence. Although the density dependent component must be included when fitting these models to population data, in defining the fundamental niche we are interested in the population’s intrinsic growth rate (See Sections 3 & 4) which can be obtained from the density-independent part of the model (assuming no Allee effects are in operation at small population sizes).
+
+The context-specific habitat usage component $u_{\mathbf{z}|\mathbf{x}}$ in eq. (\ref{eq:FXtoFx}) may be expressed as a function of habitat preference and habitat availability. This approach is taken by a broad class of methods under the collective name of Habitat Selection Functions (HSFs), a term previously introduced [@Matthiopoulos2015; @Aarts2013; @Paton2018] with reference to the most popular inferential approaches such as Maximum Entropy [MaxEnt - @Elith2011; @Merow2013] and Resource Selection Functions [RSFs - @Boyce1999; @Manly2002]. Habitat selection originates from the idea of disproportionate use, compared to the availability of a habitat [@Johnson1980]. Therefore, a habitat selection function is defined in terms of usage per unit of habitat available
+
+\begin{equation}
+\ w_{\mathbf{z}|\mathbf{x}} \propto \frac{u_{\mathbf{z}|\mathbf{x}}}{f_{\mathbf{z}|\mathbf{x}}}
+\label{eq:HSF}
+\end{equation}
+
+This expression is most often encountered in its unconditional form $w_{\mathbf{z}} \propto \frac{u_{\mathbf{z}}}{f_{\mathbf{z}}}$ [@Boyce1999]. However, the biological interpretation of an unconditional formulation is unrealistic, because it either implies that the animal has uniform access to the entire landscape, no matter how large that is [@Manly2002], or that the range of a single individual contains a completely representative sample of the broader landscape. Eq. \ref{eq:HSF} implies a definition for context-specific habitat usage [@Lele2006].
+
+\begin{equation}
+\ u_{\mathbf{z}|\mathbf{x}} = \frac{w_{\mathbf{z}|\mathbf{x}}f_{\mathbf{z}|\mathbf{x}}}{I_{\mathbf{x}}}
+\label{eq:HSF2}
+\end{equation}
+
+where the denominator is a normalizing integral $I_{\mathbf{x}}=\int_E{w_{\mathbf{z}|\mathbf{x}}f_{\mathbf{z}|\mathbf{x}}d\mathbf{z}}$ ensuring that usage across *E*-space sums to 1. Animal mobility and behavior can complicate our formulations of both determinants of usage in eq. (\ref{eq:HSF2}), so the notions of habitat availability and habitat preference are developed in the next two sections, with attention to biological realism.
+
+# Mobility and habitat availability {#MobAvail}
+Given a reference habitat $\mathbf{x}$, the availability ($f_{\mathbf{z}|\mathbf{x}}$) of other habitats $\mathbf{z}$ in the surrounding landscape will depend on spatial structuring and the mobility of the organism [@Matthiopoulos2020]. From this palette of available habitats, animals choose to use some more than others.
+
+The simplicity of the definition of habitat availability $f_\mathbf{x}$ as the amount (e.g., total area) of a habitat that is accessible to a population is deceptive, because it does not easily yield to quantification for a given species in a given landscape. As shown by a number of earlier studies [@Beyer2010; @Martin2008; @Barve2011; @Aarts2013; @Paton2018], the quantitative representation of what is available to animals can alter the parameter estimates and predictions of such models, often converting underlying preference to apparent avoidance of particular habitats, and vice-versa. This makes the definition of habitat availability one of the most challenging and influential steps of SDM development. Two aspects of movement in particular require attention. The first refers to accessibility of any point in *E*-space from another, and the second relates to complementary use of habitats by means of commuting.
+
+Dealing with accessibility between habitats $\mathbf{z}$ and $\mathbf{x}$, requires us to port geographical measures such as mobility and spatial autocorrelation into *E*-space. However, to manipulate habitat availability mathematically, we first need to represent it parametrically, as a function of statistical summaries of environmental composition. Habitat availability across an arbitrarily large geographical domain, may be approximated in $n$ environmental dimensions by a Gaussian mixture of $L$ components [@Matthiopoulos2015]. Each Gaussian component represents a kernel of high availability (a hotspot) centered at a particular location in *E*-space, and the different components are combined (mixed) according to different weights, to generate complex clouds of availability. 
+
+\begin{equation}
+\begin{aligned}
+\ f_\mathbf{x} &=\sum_{l=1}^L\psi_l f_{l,\mathbf{x}}
+\\
+\ &=\frac{1}{(2\pi)^\frac{n}{2}\prod_{k=1}^n\sigma_k}\sum_{l=1}^L\psi_l\exp\left(\frac{1}{2}\sum_{k=1}^n\left(\frac{x_k-\mu_{l,k}}{\sigma_k}\right)^2\right)
+\end{aligned}
+\label{eq:GaussianMixture}
+\end{equation}
+
+where $f_{l,\mathbf{x}}$ is the $l^{th}$ mixture component (a unimodal probability density function in $n$ dimensions), $\psi_l$ is the weight associated with the $l^{th}$ component (such that $\sum_{l=1}^L\psi_l=1$ ), $\mu_{l,k}$ is the mean (i.e., the location in *E*-space) of the $l^{th}$ mixture component along the $k^{th}$ environmental dimension and $\sigma_k$ is the characteristic standard deviation along the $k^{th}$ environmental dimension. This form of context-independent availability, defined in *E*-space, gives us the probability density of any given habitat $\mathbf{x}$ across the whole of *G*-space. This Gaussian mixture approximation is not the only way to formalize *n*-dimensional hypervolumes, but all other available approaches are similar in spirit [@Blonder2014]. In general, these are approximation methods that create smoothed clouds of availability based on environmental data. Smoothing in *E*-space produces increments of availability in habitats that may not be physically present in the area of data collection. Like all smoothing methods, there is a trade-off between the number of parameters used by the smoother and the degree of details from the data that can be emulated. In the Gaussian mixture approach above, the higher the number of components used, the better the approximation of the actual availability cloud and the lower the degree of smoothing (but smoothing may not necessarily be undesirable, as I discuss at the end of this section).
+
+We can extend these ideas to define context-specific availability $f_{\mathbf{z}|\mathbf{x}}$ which describes the frequency with which different habitats $\mathbf{z}$ would be accessible close to a reference habitat $\mathbf{x}$ and depends on organism mobility and environmental autocorrelation. Recently, an expression was derived [@Matthiopoulos2020] for context-specific habitat availability for orthogonal environmental variables (i.e., either raw environmental variables presenting no cross-correlation, or rotated covariates via a method such as principal components analysis), as perceived from the vantage point of an organism found at habitat $\mathbf{x}$. This expression describes the habitats likely to be encountered by an organism conditional on the habitat $\mathbf{x}$ where the organism is centering its usage. Intuitively, this is a localized model of availability, written in terms of the global Gaussian mixture components. 
+	
+\begin{equation}
+\begin{aligned}
+\ f_{\mathbf{z}|\mathbf{x}}&=\prod_{k=1}^n {f_{z_k|x_k}}
+\\
+\ &=\prod_{k=1}^n \frac{1}{f_{x_k}}\sum_{l=1}^L\sum_{m=1}^L{\Psi_{k,l,m}f_{l,x_k}f_{m,z_k}}
+\end{aligned}
+\label{eq:ConditionalAvail}
+\end{equation}
+
+where, as in eq. (\ref{eq:GaussianMixture}), $f_{l,x_k},f_{m,z_k}$ are respectively the $l^{th}$ and $m^{th}$ Gaussian components for the $k^{th}$ environmental dimension at the values $x,z$. The Gaussian mixture $f_{x_k}$ at the value $x$ of the $k^{th}$ variable is calculated using the new weights $\Psi_{k,l,m}$ that are derived as a function of the mobility of the study organism combined with empirical curves of the spatial autocorrelation of the environmental covariates (see Appendices in @Matthiopoulos2020). 
+
+The formulations of $f_{\mathbf{z}|\mathbf{x}}$ can describe much more complex availability clouds in *E*-space, than those shown in Figs \@ref(fig:Espace)c,d, but can also represent the contiguity and structure of habitats in *G*-space [@Matthiopoulos2020]. In addition, $f_{\mathbf{z}|\mathbf{x}}$ contains information about the mobility of the organism, enabling it to capture the scale at which a typical individual experiences the ambient heterogeneity in its environment. Implicit information on these two quintessentially geographical properties (habitat contiguity and animal mobility) allows the integral over *E*-space in eq. (\ref{eq:FXtoFx}) to capture the habitat context around $\mathbf{x}$. 
+
+Although originally proposed to account for spatial structuring, this model can readily be extended to represent temporal structuring (e.g., trend, stochastic or seasonal components). This can extend the notion of viability to temporal change [@Soberon2020], accounting for aspects of plasticity displayed by sessile, but temporally varying organisms, such as plants. 
+
+A feature of this framework not yet fully explored is complementarity in habitat use, which leads to the "zero-niche paradox" mentioned in Section 2. If an organism can commute between multiple habitats, it can use their properties in a complementary way. For example, a habitat that provides water and one that provides food may be insufficient for survival, on their own, but entirely adequate to support an organism when used in combination. By commuting, an animal effectively creates a third, sufficient habitat (containing both water and food). This can be thought of as the capacity of mobile organisms to alter habitat availability, depending on spatial context, i.e., the total set of habitats that physically exist and are within reach of an organism [@Angilletta2019]. The above approach, constructing Gaussian approximations of observed availabilities, has the potential to capture complementarity by smoothing these observed frequencies into approximate probability densities. Through this smoothing operation, habitats that do not physically exist, but are proximate to extant habitats in *E*-space, receive a non-zero density. This effectively makes them available to the animals. Although more research is needed to determine how this smoothing operation could faithfully capture complementarity between habitats, it is important to stress the expandability of the approach presented here. By redefining habitat availability in this way we would not need to alter any other aspects of the statistical frameworks reviewed in the following section, that are commonly used to describe habitat preference.
+
+#	Mobility and habitat preference {#MobPref}
+
+
+Habitat preference ($w_{\mathbf{z}|\mathbf{x}}$) can capture variations in usage due to animal behavior [@Matthiopoulos2011]. Following the requisites of HSF frameworks, such as Maximum Entropy [MaxEnt - @Elith2011; @Merow2013] and Resource Selection Functions [RSFs - @Boyce1999; @Manly2002], habitat preference is broadly expressed as an exponential transformation of a predictor function $g(\mathbf{x})$.
+
+\begin{equation}
+\ w_{\mathbf{z}|\mathbf{x}}=\exp(g(\mathbf{x}))
+\label{eq:HSFLogG}
+\end{equation}
+
+Echoing the formulation for context-independent fitness in eq. (\ref{eq:FitnessPredictor}) the predictor function $g(\mathbf{x})$ can be formulated as a 2$^{nd}$-order polynomial in the dimensions of the vector $\mathbf{x}$, for some coefficients $\gamma$. The coefficients $\gamma_{r,k}$ of habitat preference are not the same as the fitness coefficients $\beta_{r,k}$ in eq. (\ref{eq:FitnessPredictor}) because apparent habitat suitability can be context-specific [@Arthur1996; @Mysterud1998; @Gillies2006], whereas the coefficients of fitness should be fixed for any given animal. 
+
+\begin{equation}
+\ w_{\mathbf{z}|\mathbf{x}}=\exp \left( \sum_{k=1}^n\sum_{r=0}^2{\gamma_{r,k}x_k^r} \right)
+\label{eq:HSFPredictor}
+\end{equation}
+
+There is an extensive literature describing how the use of a particular habitat can be affected non-linearly by the availability of surrounding habitats, a phenomenon called a functional response in habitat selection [@Mysterud1998; @Holbrook2019]. To resolve this, it was suggested [@Boyce1999b] that functional responses could be flexibly captured by expressing the $\gamma$ coefficients of eq. (\ref{eq:HSFPredictor}) as functions of the entire habitat availability field $\gamma(\mathbf{f})$. Such varying coefficient models have existed in spatial statistics for some time [@Hastie1993], and their application in ecology is becoming more widespread [@Osborne2007; @Barnett2021], but for functional responses, the local dependence is with reference to the habitat composition of a particular region of a landscape. In its simplest form, a varying coefficient may be written as a linear combination of the availabilities of all habitats across *E*-space, for a particular landscape:
+
+\begin{equation}
+\ \gamma_{r,k}=\int_E{\eta(\mathbf{y})f_{\mathbf{y}}d\mathbf{y}}
+\label{eq:HSFVariableGammasGeneral}
+\end{equation}
+
+for some function $\eta$ that describes how the coefficient $\gamma$ responds to the availability of any given habitat $\mathbf{y}$. Specifically, $\eta$ is the change in the slope of the $r^{th}$-order term of the $k^{th}$ environmental variable as a result of a unit-increase in the availability of habitat $\mathbf{y}$. The $r,k,$ slope is the varying coefficient in relation to the $r$th-order polynomial term of the $k$th environmental variable. This varying-coefficient approach was named a *Generalized Functional Response* (GFR) [@Matthiopoulos2011] and a particular version of GFRs was formulated, by expressing the $\eta$'s as polynomial functions of environmental variables. This is the simplest formulation of GFRs and leads to an expression for the coefficients of habitat preference, in terms of the moments (i.e., the $j^{th}$-order expectations) of the marginal distributions of habitat availability along each environmental dimension
+
+\begin{equation}
+\ \gamma_{r,k}=\delta_{r,k,0}+\sum_{i=1}^n \sum_{j=1}^\infty\delta_{r,k,i,j}E[X_i^j]
+\label{eq:HSFVariableGammasPoly}
+\end{equation}
+
+In practical applications, due to limitations in data availability, only the lower moments are used (i.e., the average value of each environmental variable in the neighborhood of the point of interest). 
+
+\begin{equation}
+\ \gamma_{r,k}=\delta_{r,k,0}+\sum_{i=1}^n \delta_{r,k,i}\overline{X}_i
+\label{eq:HSFVariableGammasAv}
+\end{equation}
+
+The exploration of efficient (i.e., economical with degrees of freedom) and effective (i.e., accurate and precise) GFR models is still at its early stages and improvements of implementing the general idea of eq. (\ref{eq:HSFVariableGammasGeneral}) will be possible [@Aldossari2021]. However, currently the state-of-the-art with GFRs is eq. (\ref{eq:HSFVariableGammasPoly}), and this has repeatedly been able to improve the predictive abilities of HSF models [@Matthiopoulos2011; @Aarts2013; @Matthiopoulos2015; @Paton2018; @Muhly2019; @Matthiopoulos2019]. 
+
+
+# Parametric definition of the fundamental niche
+We now have all the necessary ingredients to construct a mathematical definition of the fundamental niche of animals, that can be estimated from field data. The condition in eq. (\ref{eq:NicheSetM}) can now be expanded with the aid of eqs (\ref{eq:FXtoFx}) and (\ref{eq:HSF2})
+
+$$ \frac{1}{I_{\mathbf{x}}} \int_E{F_\mathbf{z} w_{\mathbf{z}|\mathbf{x}}f_{\mathbf{z}|\mathbf{x}} d\mathbf{z}} \geq 0$$
+
+Given that the normalizing constant $I_{\mathbf{x}}$ is consistently non-negative, we can simplify the above expression into an equation for the boundary of the fundamental niche
+
+\begin{equation}
+\ \int_{E} {F_\mathbf{z}w_{\mathbf{z}|\mathbf{x}}f_{\mathbf{z}|\mathbf{x}}d\mathbf{z}}=0
+\label{eq:NicheBoundaryM}
+\end{equation}
+
+
+The integral is proportional to the fitness $F(\mathbf{x})$ around a reference habitat $\mathbf{x}$. It aggregates all nearby habitat-specific contributions $F_\mathbf{z}$, weighted by the availability ($f_{\mathbf{z}|\mathbf{x}}$) of each habitat and by preferential usage ($w_{\mathbf{z}|\mathbf{x}}$) of habitats by members of the species. 
+
+The three quantities participating in the integral are estimable from field data. The habitat-specific fitness $F_\mathbf{z}$ has been formulated mathematically [@Matthiopoulos2015] and fitted to space use and population growth data from the field [@Matthiopoulos2019]. This framework hybridizes spatial and demographic model fitting and is a specific example of the much broader class proposed conceptually by @Schurr2012. The habitat preference model $w_{\mathbf{z}|\mathbf{x}}$, once recast as a GFR model [@Matthiopoulos2011] can be estimated from usage data [@Matthiopoulos2011; @Matthiopoulos2019]. Finally, the context-specific availability can be derived from a flexible approximator, such as the Gaussian mixture model [@Matthiopoulos2015; @Matthiopoulos2020], as was described in Section 7. 
+
+Eq. (\ref{eq:NicheBoundaryM}) relies on different categories of parameters. The function $F_{\mathbf{z}}$ contains the vector of *fitness parameters* $\beta$, the function $w_{\mathbf{z}|\mathbf{x}}$ contains the vector of *habitat use parameters* $\gamma$ and the function $f_{\mathbf{z}|\mathbf{x}}$ contains the *habitat availability* parameters, which in the case of Gaussian mixtures would principally be ($\mu,\sigma$), the locations and variances of the Gaussian mixture components. Eq. (\ref{eq:NicheBoundaryM}) is not limited to the particular formulations mentioned above. Other types of functions may be devised to broaden the applicability of this very general framework to a wealth of life-histories for different animals. As will be seen in the examples below (Sections 10 and 11), for some biological scenarios, it is already possible to specify these functions and proceed with particular mathematical formulations of the niche.
+
+The solutions of eq. (\ref{eq:FXtoFx}) are not merely points in *E*-space, but fully parametric descriptions of entire landscapes that can offer the species neutral fitness. The equation has infinite solutions in its extended parameter space, which may have many more dimensions than *E*-space. These extra dimensions arise from the need to describe complex habitat availability distributions in *E*-space (using parameters to capture higher moments of resource distributions, such as variance, skewness, outliers, but also multimodality). For example, for an *E*-space of *n* orthogonal environmental variables, allowing a trimodal marginal distribution of availability in each environmental dimension, results in a fundamental niche space of at least $4n$ dimensions (characterizing the positions of the three modes and an identical variance around each mode). Even in the case of unimodal availability (corresponding to *n*-dimensional ellipses in *E*-space), describing a heterogeneous environment requires twice as many dimensions as Hutchinson's niche space. Only completely homogeneous environments can be sufficiently described by *n* environmental dimensions. This is not to say that the classical definition of *E*-space will not capture some points of the fundamental niche. It just means that this set of points will be contained within a larger set defined in a higher dimensional definiton of *E*-space that allows us to describe environmental heterogeneity. Although impossible to visualize, solutions to this equation are entirely possible to retrieve. As will be seen in the house sparrow example below (see eqs (\ref{eq:Homogeneous}) and (\ref{eq:Heterogeneous})), for some natural histories, it may even be possible to describe the fundamental niche using simple integral-free algebraic expressions. 
+
+However, for other biological scenarios, exhaustively describing the set of solutions by means of an algebraic expression may not be possible. In these cases, the present framework can always be used to calculate whether a particular landscape is inside or outside the niche boundary [@Godsoe2010a]. Such a "what-if" question would require us to numerically calculate the integral in eq. (\ref{eq:FXtoFx}) and thus check whether it gives positive or negative values. Similar calculations could be used to quantify fitness and compare fitness values between two candidate landscapes. Such comparisons form the basis for all generic optimization, or Monte Carlo Markov Chain methods and are therefore the core for targeted ecosystem management (see Section 13.3. *Optimizing ecosystem management*, below).
+
+
+
+# Example 1: Territorial, or colonial species
+
+By focusing on colonial or territorial species and assuming, for simplicity, equal accessibility of all points within the territory or home range, it is possible to describe availability of habitats to the animals via the simpler Gaussian mixture in eq. (\ref{eq:GaussianMixture}), instead of the conditional approximation of eq. (\ref{eq:ConditionalAvail}), which deals with gradations in accessibility. Then, the integral of eq. (\ref{eq:NicheBoundaryM}) becomes,
+
+\begin{equation}
+\ \int_{E} {\sum_{k=1}^n\sum_{r=0}^2{\beta_{r,k} x_k^r} \exp \left( \sum_{k=1}^n\sum_{r=0}^2{\gamma_{r,k}x_k^r} \right) \sum_{l=1}^L\psi_l\exp\left(\frac{1}{2}\sum_{k=1}^n\left(\frac{x_k-\mu_{l,k}}{\sigma_k}\right)^2\right) d\mathbf{x}} =0
+\label{eq:NicheBoundaryColonial}
+\end{equation}
+
+This expression has a closed form [see Appendix A in @Matthiopoulos2015]. 
+
+\begin{equation}
+\ \sum_{l=1}^L \psi_l \Theta_l \sum_{k=1}^n \sum_{r=0}^2 \beta_{r,k}Z_{r,k}=0
+\label{eq:NicheBoundaryClosed}
+\end{equation}
+
+where
+
+\begin{equation}
+\ \Theta_l=\prod_{k=1}^n\left( \frac{2\pi\sigma_k^2}{1-2\gamma_{2,k}\sigma_k^2 }\right)^\frac{1}{2} \exp\left( \gamma_{0,k}-\frac{\mu^2_{l,k}}{2\sigma^2_k}+\frac{(\gamma_{1,k}\sigma_k^2+\mu_{l,k})^2}{2\sigma_k^2(1-2\gamma_{2,k}\sigma_k^2)}\right)
+\label{eq:BigTheta}
+\end{equation}
+
+and
+
+\begin{equation}
+\ Z_{0,k}=1,\ \ Z_{1,k}= \frac{\gamma_{1,k}\sigma_k^2+\mu_{l,k}}{1-2\gamma_{2,k}\sigma_k^2} ,\ \ Z_{2,k}=\frac{\sigma_k^2}{1-2\gamma_{2,k}\sigma_k^2} \left(1+ \frac{(\gamma_{1,k}\sigma_k^2+\mu_{l,k})^2}{\sigma_k^2(1-2\gamma_{2,k}\sigma_k^2)} \right)
+\label{eq:ZeDs}
+\end{equation}
+
+Note that this expression is independent of $\mathbf{x}$. It depends purely on the parameters of fitness ($\beta$), habitat availability ($\psi, \mu,\sigma$) and habitat preference ($\gamma$). The fitness parameters are fixed (independent of habitat availability) and the habitat preference parameters depend on habitat availability (via a GFR, see eq. (\ref{eq:HSFVariableGammasAv})). Therefore, the fundamental niche boundary in this example depends solely on the habitat composition of the home range or territory. Ultimately therefore, we can decide if a particular landscape composition within the territory (as determined by $\psi, \mu,\sigma$) allows a typical animal from the species to have positive fitness. 
+
+
+
+```{r 1dEx, echo=FALSE, fig.cap="A simple example of how fitness, habitat availability, habitat preferences and habitat use interact to shape the fundamental niche. a) Fitness of the species for different values of the environmental variable. b) Two profiles of habitat availability. The low-x scenario (dashed curve) represents a territory that has on average lower x-values in comparison to the medium-x scenario (solid curve). c) The corresponding habitat preference curves as might be inferred by fitting a Habitat Selection Model to d) the usage of points with different $x$ values within the territory. e) The two dimensional niche space examines all possible combinations of mean and variance for the environmental profile of availability (hence each point in the space is a curve such as those shown in b). The blue and red dots correspond to the coloured curves in the previous plots. The red color gradient indicates negative fitness and blue are positive. The white zones sourround the boundary of the niche. f) The consequences of removing behavioral plasticity from the animals so that their habitat preferences are invariant under habitat availability changes.", fig.height=6, fig.width=5.5, cache=TRUE}
+
+def.par <- par(no.readonly = TRUE) 
+layout(matrix(c(1,2,3,4,5,6),3,2,byrow=T))
+
+# Environmental variable
+x<-seq(0,100,.1)
+
+# Fitness
+beta0<--200
+beta1<-10
+beta2<--beta1/100
+Fx<-beta0+beta1*x+beta2*x^2
+plot(x,Fx, type="h",col="grey",lwd=2.5, ylab="Fitness curve", main="a. Species fitness curve", xlab="Habitat variable")
+text(x=c(10,50,90), y=c(-50,25,-50),labels=c("-","+","-"), cex=3)
+abline(0,0)
+
+
+
+# E-space, availability
+mu1<-50
+si1<-8
+fx1<-dnorm(x,mu1,si1)
+fx1<-fx1/sum(fx1)
+
+mu2<-15
+si2<-8
+fx2<-dnorm(x,mu2,si2)
+fx2<-fx2/sum(fx2)
+
+plot(x,fx1, type="l", ylim=c(0,max(fx1,fx2)),lwd=2.5, xlab="Habitat variable", ylab="Availability", main="b. Habitat availability", col="Blue")
+text(32,0.003,"Low")
+lines(x,fx2, type="l",lwd=2.5, col="Red", lty=2)
+text(72,0.003,"Medium")
+
+
+
+# E-space, preference
+s<-15
+muall1<-sum(fx1*x)
+mup1<-50+0.7*(50-muall1)
+gamma10<--mup1^2/(2*s^2)
+gamma11<-mup1/s^2
+gamma12<--1/(2*s^2)
+wx1<-exp(gamma10+gamma11*x+gamma12*x^2)
+wx1<-wx1/sum(wx1)
+
+
+muall2<-sum(fx2*x)
+mup2<-50+0.7*(50-muall2)
+gamma20<--mup2^2/(2*s^2)
+gamma21<-mup2/s^2
+gamma22<--1/(2*s^2)
+wx2<-exp(gamma20+gamma21*x+gamma22*x^2)
+wx2<-wx2/sum(wx2)
+
+
+plot(x,wx1, type="l",lwd=2.5, xlab="Habitat variable", ylab="Preference curve", ylim=c(0,max(wx1,wx2)), main="c. Habitat preference", col="Blue")
+lines(x,wx2, type="l",lwd=2.5, col="Red", lty=2)
+
+
+
+# E-space, usage
+ux1<-wx1*fx1/sum(wx1*fx1)
+ux2<-wx2*fx2/sum(wx2*fx2)
+plot(x,ux1, type="l",lwd=2.5, ylim=c(0,max(ux1,ux2)), xlab="Habitat variable", ylab="Usage curve", main="d. Habitat use (Realised niches)", col="Blue")
+lines(x,ux2, type="l",lwd=2.5, col="Red", lty=2)
+
+
+s<-15
+d<-200
+Mu<-seq(0,100, length.out=d)
+Si<-seq(1,15, length.out=d)
+th<-expand.grid(Mu,Si)
+th<-cbind(th,th[,1]*0)
+for( i in 1:nrow(th))
+{
+  fx<-dnorm(x,th[i,1],th[i,2])
+  fx<-fx/sum(fx)
+  muall<-sum(fx*x)
+  mup<-50+0.7*(50-muall)
+  gamma0<--mup^2/(2*s^2)
+  gamma1<-mup/s^2
+  gamma2<--1/(2*s^2)
+  wx<-exp(gamma0+gamma1*x+gamma2*x^2)
+  wx<-wx/sum(wx)
+  ux<-wx*fx/sum(wx*fx)
+  th[i,3]<-sum(ux*Fx)
+}
+image(Mu,Si,matrix(th[,3],d,d), xlab="Mean", ylab="Variance", main="e. Fundamental niche (Plasticity)", col=brewer.pal(11,"RdBu"), zlim=c(-190,190))
+contour(Mu,Si,matrix(th[,3],d,d), add=TRUE, levels=c(0), lwd=1, col="black")
+#contour(Mu,Si,matrix(th[,3],d,d), add=TRUE,  levels=c(10,20,30,40,50),lwd=.1, col="black")
+text(x=c(10.4,50.4,90.4), y=c(4.95,4.95,4.95),labels=c("-","+","-"), cex=3,col="white")
+text(x=c(10,50,90), y=c(5,5,5),labels=c("-","+","-"), cex=3,col="grey4")
+points(mu1,si1, col="Blue", cex=2, pch=19)
+points(mu2,si2, col="Red", cex=2, pch=19)
+
+Mu<-seq(0,100, length.out=d)
+Si<-seq(1,15, length.out=d)
+th<-expand.grid(Mu,Si)
+th<-cbind(th,th[,1]*0)
+for( i in 1:nrow(th))
+{
+  fx<-dnorm(x,th[i,1],th[i,2])
+  fx<-fx/sum(fx)
+  muall<-sum(fx*x)
+  mup<-50+0*(50-muall)
+  gamma0<--mup^2/(2*s^2)
+  gamma1<-mup/s^2
+  gamma2<--1/(2*s^2)
+  wx<-exp(gamma0+gamma1*x+gamma2*x^2)
+  wx<-wx/sum(wx)
+  ux<-wx*fx/sum(wx*fx)
+  th[i,3]<-sum(ux*Fx)
+}
+
+image(Mu,Si,matrix(th[,3],d,d), xlab="Mean", ylab="Variance", main="f. Fundamental niche (No plasticity)", col=brewer.pal(11,"RdBu"), zlim=c(-190,190))
+contour(Mu,Si,matrix(th[,3],d,d), add=TRUE, levels=c(0), lwd=1, col="black")
+#contour(Mu,Si,matrix(th[,3],d,d), add=TRUE,  levels=c(10,20,30,40,50),lwd=.1, col="black")
+text(x=c(10.5,50.5,90.5), y=c(4.9,4.9,4.9),labels=c("-","+","-"), cex=3,col="white")
+text(x=c(10,50,90), y=c(5,5,5),labels=c("-","+","-"), cex=3,col="grey4")
+points(mu1,si1, col="Blue", cex=2, pch=19)
+points(mu2,si2, col="Red", cex=2, pch=19)
+
+par(def.par)  #- reset to default
+
+```
+
+To gain some intuition around these expressions, consider a hypothetical scenario (Fig.\@ref(fig:1dEx)) in which a territorial organism is affected by only one environmental variable $x$, so that $n=1$. Fitness of the organism is highest at intermediate values of the variable and extreme values of the variable are inviable (i.e., confer negative fitness - see Fig.\@ref(fig:1dEx)a). We assume that the organism has complete access to all points within its territory and the distribution of values of the environmental variable has a simple unimodal shape, so that the sole Gaussian component ($L=1, \psi_1=1$) is described by $(\mu,\sigma)$ (two examples of such availability profiles are shown in (Fig.\@ref(fig:1dEx)b)). The habitat preferences (Fig.\@ref(fig:1dEx)c) are affected by a functional response, so that in the scenario of lower average values of $x$ (red dashed curve in Fig.\@ref(fig:1dEx)b) the animal appears to show stronger preference for higher values of $x$ (red dashed curve in Fig.\@ref(fig:1dEx)c). Following the GFR approach (eq. (\ref{eq:HSFVariableGammasAv})), the parameters of habitat preference for the linear and quadratic response to the single environmental variable can be written as linear functions of availability so that $\gamma_1=\delta_{1,0}+\delta_{1,1}\mu, \gamma_2=\delta_{2,0}+\delta_{2,1}\mu$.
+
+Consequently, the animal can shift its usage (Fig.\@ref(fig:1dEx)d) of the environmental variable closer to the intermediate values of $x$. In *G*-space, in the low-$x$ scenario the animal would concentrate its usage to parts of the territory with intermediate values of $x$, but these parts would appear to be preferred more than the medium-$x$ scenario. We can investigate the implications of this simple form of behavioral plasticity for the size of the niche, but first we need to decide on the dimensionality of the relevant niche space. For this example, the availability profile of the single variable is determined by two quantities, the mean and variance of the availability distributions in Fig.\@ref(fig:1dEx)b. These two values form the dimensions of the niche space. So, even though the Hutchinsonian $E$-space is one-dimensional, spatial variability in $x$ values across the territory means that the niche space is two-dimensional. Fig.\@ref(fig:1dEx)e shows the shape of the fundamental niche in this 2D space and the colors indicate the fitness of the animals living in these conditions. By specifying eqs (\ref{eq:NicheBoundaryClosed})-(\ref{eq:ZeDs}) to the circumstances of this simple example, the boundaries of the niche are given by solutions of the following equation in $\mu, \sigma$:
+
+\begin{equation}
+\begin{split}
+\left( \frac{2\pi\sigma^2}{1-2\gamma_{2}\sigma^2 }\right)^\frac{1}{2} \exp\left( \gamma_{0}-\frac{\mu^2}{2\sigma^2}+\frac{(\gamma_{1}\sigma^2+\mu)^2}{2\sigma^2(1-2\gamma_{2}\sigma^2)}\right)
+\times
+\\
+\left( 
+\beta_0+
+\beta_1\frac{\gamma_1\sigma^2+\mu}{1-2\gamma_2\sigma^2}+
+\beta_2 \frac{\sigma^2}{1-2\gamma_{2}\sigma^2} \left(1+ \frac{(\gamma_{1}\sigma^2+\mu)^2}{\sigma^2(1-2\gamma_{2}\sigma^2)} \right) \right)=0
+\end{split}
+\label{eq:Niche1D}
+\end{equation}
+
+Removing the functional response from the model (by setting $\delta_{1,1}=0, \delta_{2,1}=0$), such that the animals have exactly the same habitat preference, regardless of habitat availability, gives rise to a different (smaller) niche (Fig.\@ref(fig:1dEx)f). Comparison of Figs \@ref(fig:1dEx)e & f illustrates the intuitive notion that in heterogeneous environments animals can improve their fitness by selectively using the better parts of their home range. As heterogeneity increases, it becomes more likely that animals can find and focus on extremely suitable places, extracting ever-higher fitness.
+
+# Example 2: House sparrows in suburbia
+I now apply these ideas to a real example based on the analysis of @Matthiopoulos2019 which looked at fine-scale suburban garden composition within the home ranges of different sparrow colonies around Glasgow, Scotland. The complete data set and analysis are included in the Supplements (all niche-related figures below are produced as part of the Markdown pipeline based on these previous results and interested readers can experiment with the modeling decisions from the very start of the full analysis). 
+
+Home range composition was described in terms of six land cover variables. Sparrows were not particularly selective within their home ranges (the habitat preference model explained only 33% of observed patterns of usage), but the population models based on habitat availability and usage captured 81% of the variability in colony growth rates, under cross-validation, and were found to exceed the performance of models carrying no information on habitat heterogeneity. This high predictive ability was achievable with detailed information on the distribution of three of the six variables (grass, bush and roof structures). Superabundance of any of these variables was detrimental to population growth. Sparrow colonies were least tolerant of high percentages of lawn and performed better in the presence of bushes and roof structures. Hence, although a full characterization of the fundamental niche of sparrows would require a more biologically sophisticated set of habitat variables, the suburban sparrow system is a good exemplar because it achieves high predictive power for a low number of niche dimensions and the simplicity of this example incurs no loss of generality for the mathematical framework. Indeed, the changes in the niche hypervolumes described below are likely to be more pronounced if more covariates were used.
+
+
+```{r sparrowNicheCalc, cache=TRUE, include=FALSE}
+
+ll<-50 # Number of subdivisions along each dimension of E-space
+mu<-seq(0,1,length.out = ll) # Tick points on each dimension
+mus<-as.data.frame(expand.grid(mu,mu,mu)) # Combinations of mus
+mus<-cbind(mus, rep(0, length(mus[,1]))) # Data storage
+names(mus)<-c("M1_Bush","M1_Roof","M1_Grass","M1_Colony.Size")
+
+gammas<-ga.gfr(gfrModel$model,mus)$gammas # Calculation of gammas for GFR
+gammas<-data.frame(gammas$intercept,gammas$Bush,gammas$Roof,gammas$Grass )
+
+betas<-c(spatial$coefficients[1],spatial$coefficients[2],spatial$coefficients[4],spatial$coefficients[3])
+
+mus<-as.matrix(mus[,1:3])
+
+pts<-mus
+col<-col0<-core<-mus[,1]*0
+cex<-cex0<-mus[,1]*0
+feas<-0 # Counts number of feasible combinations
+
+for(i in 1:length(mus[,1]))
+{
+  if(sum(mus[i,])<=1)
+  {
+
+    feas<-feas+1
+    
+    # Fitness for reference habitat in homogeneous scenario
+    f0<-as.numeric(betas[1]+sum(betas[2:4]*mus[i,]))
+    # Does reference habitat belong to niche?
+    if(f0>0)
+    {
+      col0[i]<-betas[1]+sum(betas[2:4]*mus[i,]) # Fitness color
+      cex0[i]<-1  # Switches on plotting for this point
+    }
+    
+    # Maximum variance for sphere to fit inside feasible region
+    sisM<-min(c(mus[i,],(1-sum(mus[i,]))/sqrt(3)))^2/7.815
+    # Range of variances to be explored for this reference habitat
+    siS<-seq(0,sisM,0.0001)
+    # Set maximum fitness to zero
+    fm<-0
+    
+    for(sis in siS)
+    {
+      f<-as.numeric(betas[1]+sum(sis*betas[2:4]*gammas[i,2:4]+betas[2:4]*mus[i,]))
+      
+      # Is fitness positive and greater than current maximum for this reference habitat?
+      if(f>0 && f>fm) 
+      {
+        fm<-f # Maximum fitness for reference habitat is updated
+        
+        # The following lines examine every point in E-space for membership 
+        # in the sphere of the current reference habitat. If the point is inside 
+        # the sphere then that point is switched on (for plotting - cex) and 
+        #inherits the fitness of the reference habitat (for color - col).
+        
+        # Distance of all points from reference habitat
+        dis<-sqrt(rowSums((mus-matrix(mus[i,],nrow=dim(mus)[1],ncol=dim(mus)[2],byrow=T))^2))
+        # All feasible points inside sphere around ref habitat
+        indi<-as.numeric(dis<=min(c(mus[i,],(1-sum(mus[i,]))/sqrt(3))))
+        # Replace fitness of this ref habitat into those points, if bigger than existing
+        col<-pmax(col,f*indi )
+        # Allow these points to be plotted if not previously allowed
+        cex<-pmax(cex, indi)
+        
+        core[i]<-f # Core fitness. The maximum fitness attained by this reference habitat.
+      }
+    }
+  
+    
+  }
+  
+}
+
+
+```
+
+```{r sparrowStats, cache=TRUE, include=FALSE}
+
+
+# Viable space
+viable<-round(sum(col0>0)/sum(feas),2)*100
+print(paste("Viable space as subset of feasible space :",viable,"%"))
+viableHet<-round(sum(col>0)/sum(feas),2)*100
+print(paste("Viable space (heterogeneous) as subset of feasible space :",viableHet,"%"))
+
+# Proportion improved
+improved<-round((sum(((core-col0)>0)*(col0>0))/sum(col0>0))*100)
+print(paste("Proportion of habitats with improvement in max fitness :", improved,"%"))
+
+# Proportion of external points
+external<-round((1-sum(col0>0)/sum(core>0))*100,2)
+print(paste("Proportion additional viable habitats :", external,"%"))
+
+# Amount improvement
+inds<-as.logical(((col0)>0) * ((core-col0)>0))
+dfit<-round((core[inds]/col0[inds]-1)*100,2)
+dfitM<-round(mean(dfit),2)
+dfitCI<-round(quantile(dfit,c(0.025,0.975)),2)
+print(paste("Average improvement in fitness as a proportion of original :", dfitM,"%  (95CI:",dfitCI[1],"%,",dfitCI[2],"%)."))
+
+
+```
+
+An integral-free expression can be derived for suburban house sparrows, describing their fundamental niche's boundary in terms of garden composition (and heterogeneity therein), fitness parameters and habitat selection parameters. The habitat selection model fitted to the sparrow data in [@Matthiopoulos2019] contained no quadratic terms in any of the habitat variables, which implies that $\gamma_{2,k}=0$ and $\beta_{2,k}=0$ for all $k$. This greatly simplifies eqs (\ref{eq:BigTheta}) and (\ref{eq:ZeDs}) to
+
+\begin{equation}
+\Theta_l=\prod_{k=1}^n \sqrt{2\pi}\sigma_k \exp\left( \gamma_{0,k}+\frac{1}{2}\gamma_{1,k}^2\sigma_k^2+\gamma_{1,k}\mu_{l,k}\right)
+\label{eq:BigThetaL}
+\end{equation}
+
+\begin{equation}
+\ Z_{0,k}=1,\ \ Z_{1,k}= \gamma_{1,k}\sigma_k^2+\mu_{l,k}
+\label{eq:ZeDsL}
+\end{equation}
+
+The expression for $Z_{2,k}$ has been omitted since $\beta_{2,k}=0$. Although this model was fitted to real scenarios from the field, and hence its parameters are data-driven [@Matthiopoulos2019], it can be used to quantify the niche in much simpler versions of environmental space (e.g., unimodal availability clouds), revealing some highly informative features of the niche, under minimally realistic conditions. 
+
+To begin, let us assume for this illustration only, that sparrows occupy home ranges whose habitat composition can be described by a single (i.e., $L=1$ and $\psi_1=1$) Gaussian component of $n$ orthogonal variables (e.g., @Jimenez2019). This means that habitat variables have unimodal, symmetric distributions within the home range and there are no correlations between them. To further reduce parameters, we will assume that the three environmental variables have the same dispersion. Hence, habitat availability $f_{\mathbf x}=\mathcal{N}_n(\mathbf{x},\sigma \mathbf I_n)$ has spherical contours around a centroid $\mathbf{x}=(x_1,...,x_k,...,x_n)$ positioned at the average values of the three environmental variables (i.e., $x_k=\mu_k$). Here, $\sigma$ is the standard deviation shared between the three environmental variables and $\mathbf I_n$ is the $n \times n$ identity matrix. The parameter $\sigma$ will be used here as a convenient shorthand for environmental heterogeneity. In particular, as $\sigma\rightarrow0$, the entire home range comprises identical cells, each with composition $\mathbf{x}$. These simplifications of availability and *E*-space give a very tractable version of the niche boundary for sparrows
+
+$$\prod_{k=1}^n \sqrt{2\pi}\sigma \exp\left( \gamma_{0,k}+\frac{1}{2}\gamma_{1,k}^2\sigma^2+\gamma_{1,k}x_{k}\right) \times\sum_{k=1}^n \left( \beta_{0,k}+\beta_{1,k}\gamma_{1,k}\sigma^2+\beta_{1,k}x_{k}\right)=0$$
+Given that the first component of this product can never be zero, the expression further reduces to
+
+\begin{equation}
+\sum_{k=1}^n \left( \beta_{0,k}+\beta_{1,k}\gamma_{1,k}\sigma^2+\beta_{1,k}x_{k}\right)=0
+\label{eq:Homogeneous}
+\end{equation}
+
+Under the GFR framework, the habitat selection coefficients can be written as functions of moments from the marginal distributions of the environmental variables (see eq. (\ref{eq:HSFVariableGammasPoly})). In @Matthiopoulos2019 these were sufficiently modeled as linear functions of the averages of all covariates, so that $\gamma_{1,k}=\delta_{1,k,0}+\sum_{i=1}^n \delta_{1,k,i}x_i$. This affords an expression for the niche in terms of purely $\beta,\sigma,\mathbf{x}$
+
+$$\sum_{k=1}^n \left( \beta_{0,k}+\beta_{1,k}\sigma^2(\delta_{1,k,0}+\sum_{i=1}^n \delta_{1,k,i}x_i)+\beta_{1,k}x_{k}\right)=0$$
+
+Defining $\beta_0=\sum_{k=1}^n\beta_{0,k}$ 
+
+\begin{equation}
+\beta_0+\sum_{k=1}^n \left(\beta_{1,k}\sigma^2(\delta_{1,k,0}+\sum_{i=1}^n \delta_{1,k,i}x_i)+\beta_{1,k}x_{k}\right)=0
+\label{eq:Heterogeneous}
+\end{equation}
+
+For this example, it can be shown that the left hand side of this equation is also equal to fitness, further facilitating interpretation. This expression was used to explore the fundamental niche of this population, within the much simplified, unimodal version of habitat availabilities in *E*-space. Below, I will refer to the average habitat composition $\mathbf{x}=(x_R,x_G,x_B)$ for roof, grass and bush, as the *reference habitat*, a point in Hutchinsonian *E*-space. The only feasible reference habitats satisfy $x_R+x_G+x_B\leq100\%$. Note that the three land cover variables were not exhaustive, because the habitat was characterized by other covariates for land cover. So, their sum could be any number between 0 and 1. I examined two scenarios of habitat composition. For the homogeneous scenario, I set $\sigma=0$. For the heterogeneous scenario, the variability of habitats around the reference habitat $\mathbf{x}=(x_R,x_G,x_B)$ was explored by varying the value of $\sigma$ from zero, up to its biologically feasible maximum. This was calculated in terms of the reference habitat $\mathbf{x}$ via the following practical steps: 
+
+- In a heterogeneous home-range, different habitats $\mathbf{z}=(z_R,z_G,z_B)$ will be represented as points in *E*-space that are at some distance from the mean (i.e., the reference habitat $\mathbf{x}$).
+- Each of these points must satisfy positivity constraints and the 100% summation constraint ($z_R+z_G+z_B\leq100\%$).
+- Gaussian densities $f_\mathbf{x}$ are, of course, unbounded so although they are mathematically convenient, some proportion of their density will "leak" outside feasible bounds, creating impossible habitats (i.e., negative proportions or total habitat proportions exceeding 100%).
+- The feasibility requirements will be more severely violated when $\sigma$ increases to such an extent that a high proportion of probability density $f_\mathbf{x}$ is outside the 100% summation boundary.
+- To make sure that the results are not greatly affected by such violations and remain consistent across different reference habitats $\mathbf{x}$, I stipulated that home range heterogeneity ($\sigma$) would always retain >95% of the Gaussian density within the feasible region. 
+- I defined the radius $r$ of a sphere in *E*-space around the reference habitat, as the 95%-percentile of the Gaussian density $f_\mathbf{x}$. For a variate with a multivariate standard normal $\mathcal{N}_3(\mathbf{0},I_3)$ distribution the square of the Mahalanobis distance is chi-square distributed, with critical value at 95% of $\chi^2_3(1-0.95)=7.815$. So, the critical distance is $r=\sigma\sqrt{7.815}$. 
+- The maximum value that this could take is $r_{max}=\min(x_R,x_G,x_B,d)$, where $d=(1-x_R-x_G-x_B)/\sqrt{3}$ is the distance of the reference habitat $\mathbf{x}$ from the inclined plane of 100% land cover. 
+- This implies that the maximum value $\sigma_{max}$ of the heterogeneity parameter $\sigma$ is $\sigma_{max}(\mathbf{x})=r_{max}/\sqrt{7.815}$. 
+
+Within the feasible interval $\sigma\in [0,\sigma_{max}(\mathbf{x})]$, I defined viability as the occurrence of a positive value on the left-hand-side of eq. (\ref{eq:Heterogeneous}). I also recorded these values as the measure of fitness at each reference habitat $\mathbf{x}$. For the homogeneous scenario, only one value of viability and fitness corresponded to each reference habitat. For the heterogeneous scenario, I recorded the maximum achievable fitness and the corresponding value of habitat heterogeneity $\sigma$ that produced it.
+
+I generated the following statistics to examine the impact of heterogeneity and habitat selectivity on the niche. First, the percentage of feasible environmental space that contained viable reference habitats for the homogeneous case. Second, the percentage of reference habitats whose fitness was improved with the addition of heterogeneity and selectivity. Third, the percentage of inviable reference habitats that were made viable with the addition of heterogeneity and selectivity. Fourth, the percentage of increase in fitness resulting from the addition of heterogeneity and selectivity. 
+
+
+```{r sparrowNiche, echo=FALSE, cache=TRUE, fig.height=5.5, fig.width=5.5, fig.cap="Visualizing the fundamental niche of house sparrows in homogeneous and heterogeneous home ranges. The transparent plane represents a feasibility boundary, preventing the sum of the three land cover variables from exceeding 100%. The three axes are plotted from 0% to 80%, to better focus on the viable region. Relative fitness values (or their differences) are colored on a gradient from high (red) to low (blue). The homogeneous scenario (a) assumes that all parts of a home range have the same composition as the average of the home range - the reference habitat. Hence, (a) is a data-derived representation of Hutchinson's *E*-space hypervolume for the sparrows in this study. The heterogeneous scenario (b) encloses all habitats that occur in viable home ranges when the heterogeneity in a home ranges maximizes fitness. The difference (c) between the predictions of the two scenarios highlights which regions of the homogeneous fundamental niche benefit from the existence of habitat heterogeneity and sparrow selectivity. The core difference (d) compares the change in relative fitness for homogeneous and heterogeneous home ranges with the same average habitat composition."}
+
+library("plot3D")
+minScale<-30/ll
+mut<-seq(0,1,length.out = 200)
+z<-matrix(pmax(0,1-rowSums(expand.grid(mut,mut))),200,200)
+z[z==0]<--0.01
+plane<-list(x=mut,y=mut,z=z, facets=TRUE, col=rgb(100,200,200,max=255,alpha=120))
+
+names(pts)<-c("Bush","Roof","Grass")
+rng<-c(0,0.8)
+par(mfrow=c(2,2), mar=c(1, 1.5, 1.5, 2.5))
+scatter3D(pts[,1],pts[,2],pts[,3], surf=plane, pch=19,phi = 0, theta=50,bty ="g", cex=minScale*cex0,xlim=rng, ylim=rng,zlim=rng, xlab="% Bush",ylab="% Roof",zlab="% Grass",colvar=col0, colkey=T, main="a. Homogeneous")
+
+scatter3D(pts[,1],pts[,2],pts[,3], surf=plane, pch=19,phi = 0, theta=50, bty ="g", cex=minScale*cex,xlim=rng, ylim=rng,zlim=rng, xlab="% Bush",ylab="% Roof",zlab="% Grass",colvar=col, colkey=T, main="b. Heterogeneous")
+
+scatter3D(pts[,1],pts[,2],pts[,3], surf=plane, pch=19,phi = 0, theta=50, bty ="g", cex=minScale*((col-col0)>0),xlim=rng, ylim=rng,zlim=rng, xlab="% Bush",ylab="% Roof",zlab="% Grass",colvar=col-col0, colkey=T, main="c. Difference")
+
+scatter3D(pts[,1],pts[,2],pts[,3], surf=plane, pch=19,phi = 0, theta=50, bty ="g", cex=minScale*((core-col0)>0),xlim=rng, ylim=rng,zlim=rng, xlab="% Bush",ylab="% Roof",zlab="% Grass",colvar=core-col0, colkey=T, main="d. Core difference")
+par(mfrow=c(1,1), mar=c(5, 4, 4, 2) + 0.1)
+
+
+```
+
+Under the assumption of home range homogeneity (i.e., under the Hutchinsonian *n*-hypervolume definition of the fundamental niche), I found that the niche occupied `r viable`% of feasible *E*-space (Fig.\@ref(fig:sparrowNiche)a). Introducing habitat heterogeneity and sparrow selectivity allowed an increase of the complete set of habitats that could be included in viable home ranges to `r viableHet`% of feasible space (Fig.\@ref(fig:sparrowNiche)b). Improvements in the maximum fitness of animals encountered in different habitats, occurred primarily in the centre of viable space (Fig.\@ref(fig:sparrowNiche)c) because this form of spherical heterogeneity could not be high close to the borders of the feasible niche space, where $\sigma_{max} \rightarrow 0$. The fitness characterizing entire home ranges was also improved compared to the homogeneous scenario (Fig.\@ref(fig:sparrowNiche)d), because sparrows could select to use the better-than average parts of their heterogeneous home ranges. In `r improved`% of previously viable homogeneous home ranges, fitness was improved when habitat heterogeneity and selectivity were introduced and an additional `r external`% of previously inviable ranges became viable (essentially, this represents the scenario where the mean values of habitat variables imply extinction, but the species can survive by using small refuge parts in their home range selectively). The average improvement in fitness was `r dfitM`% (95CI: `r dfitCI[1]`%,`r dfitCI[2]`%). It is notable that these levels of niche and viability inflation are observed in a model with only three environmental covariates, under the most rudimentary form of heterogeneity (i.e., a shared variance parameter for all environmental variables, with no multimodality or asymmetries) and in a study species that demonstrated limited selectivity for habitats within the individual colony range. This is therefore a stringent demonstration, using field data, of the original hypothesis that heterogeneity and behavioral plasticity alter the shape of Hutchinson's fundamental niche in a real species.
+
+# Necessary adjustments to our notion of the fundamental niche of animals
+The fundamental niche began life a century ago, as an aid to scientific intuition [@ParentoniMartins2017]. However, as our broader ecological understanding has developed, we have unveiled many of the limitations of our textbook schematics of the niche [@Araujo2006; @Angilletta2019]. At the same time, the proliferation of niche-related models in the management of vital ecosystems, means that our intuition about the niche is more important and relevant than ever [@Hurlbert1981; @Holt2009]. By formulating models of the fundamental niche appropriate for vagile and selective animals in heterogeneous environments, the above synthesis brings the following conceptual adjustments into sharper focus. 
+
+## It has more dimensions than Hutchinson's niche space
+The environments experienced by animals cannot be characterized sufficiently as single points in *E*-space, as Hutchinson had envisaged. Habitat availability clouds in environmental spaces may have multiple loci, they are not necessarily convex and may often have discontinuities or holes [@Blonder2016; @Blonder2018; @Soberon2020; @Jimenez2021]. Animals respond selectively to these complex availability clouds and their fitness is determined by the *entirety* of these interactions. The two examples in this monograph, as well as the extensive theoretical spatial literature [@Tilman1997], have shown that spatial heterogeneity matters for fitness. Therefore, the didactic "severing" [@Colwell2009] between *E*- and *G*-spaces that served Hutchinson so well, now needs to be reconsidered. Spatial heterogeneity leads to variance, autocorrelation and multimodality in availability clouds. Representing these important statistical properties in niche spaces requires the introduction of additional degrees of freedom, more niche dimensions [@Hurlbert1981]. 
+
+For instance, in the sparrow example above, only three environmental variables were considered, but to fit the model to real data, a total of 57 dimensions were used to describe the heterogeneity in garden compositions. Such high dimensions are evidently required by the data because they persist through various filters of model parsimony (e.g., model selection, regularisation, cross-validation). To illustrate the predictions of such high-dimensional models in 3D Hutchinsonian *E*-space (Fig.\@ref(fig:sparrowNiche)), I specified the fully-fitted model to the simplest scenario of habitat heterogeneity, using unimodal Gaussian spheres in *E*-space. This meant that the niche model was explored in 4D space (i.e., the three mean values for the land cover variables with the addition of a common variance dimension describing habitat heterogeneity within a home range). The extent and consequences of this rudimentary form of heterogeneity in the sparrows' home ranges could then be examined by increasing a single variability parameter $\sigma$ from zero (i.e., homogeneous home range), to its largest feasible value. The visualisations in Fig.\@ref(fig:sparrowNiche), therefore represent the minimum deviation from Hutchinson's niche space because they use only one more dimension than the three environmental variables in the system. The resulting inflation in the fundamental niche indicates that these increases in dimensionality are not just theoretically but also quantitatively influential. Importantly, such high-dimensional niches have been explicitly anticipated, as a reconciling route between the predictions of niche and neutral theories [@Clark2007]. 
+
+Using more degrees of freedom to describe more complex environmental objects is an obvious [@Hurlbert1981], but somewhat intimidating [@MacNab2018], solution to dealing with the diversity of habitats experienced by individual animals. However, the "curse of dimensionality" [@Bellman1957] is not a mathematical problem, it is primarily a computational one, particularly for statistical inference with real data. The theoretical framework presented here and elsewhere [@Matthiopoulos2015], demonstrates that high-dimensional calculations with the fundamental niche can be approached analytically, reducing the model fitting component to the form of generalized linear models [see application in @Matthiopoulos2019], a type of inferential tool that can deal efficiently with many hundreds of dimensions. 
+
+
+## It is not necessarily a bounded subset of *E*-space
+Hutchinsonian niches focus on environmental conditions [e.g., temperature, humidity etc. often called *scenopoetic* variables - @Hutchinson1978; @Colwell2009; @Soberon2009], characteristics that set limits to viability [@Godsoe2017]. As a result, fundamental niches are often defined as hypervolumes with a well-defined core, suspended in *E*-space [@Blonder2014; @Soberon2020]. Applied work has adhered to this image, by often focusing on niches of finite volume and breadth [e.g., @Broennimann2012; @Carscadden2020 and also the sparrow example above].
+
+However, Hutchinson recognized that resources also have a role to play in defining niche spaces [@Hurlbert1981; @Colwell2009; @Kearney2010]. Unlike fitness responses to conditions (which usually correspond to maximum and minimum tolerances), fitness responses to resources are unbounded (i.e., organisms are not likely to die if they are surrounded by too much food, unless this is at the expense of other valuable resources). Other authors have noted the importance of (real, or perceived) risk in shaping species distributions [@DeCesare2014]. Responses to risks are only bounded below by zero (i.e., everything else being equal, the lower the risk, the better). 
+
+Resources and risks may, in many cases affect the distribution of a species without their own distribution being affected by it (but see below material on multispecies interactions in Section 13.1.). If we include resources and risks [collectively known as *bionomic* variables - @Hutchinson1978; @Colwell2009; @Soberon2009] in the set of environmental dimensions of *E*-space, then our intuitive image needs to be adjusted to admit niches that are unbounded or are in contact with the environmental axes. 
+
+
+## It is more maleable, but also more predictable
+A corollary of the high dimensionality of animal niches is that niche boundaries in *E*-space may appear less predictable ("fuzzy" - @Angilletta2019) than they are. Certainly, process stochasticity, individual variation and observation errors will make the niche boundaries non-deterministic, but some of their apparent uncertainty may be due to our misrepresenting them as lower-dimensional objects. This implies that the fundamental niches of animals are more malleable than has thus far been imagined. Heterogeneous environments can be more favorable to a mobile and selective species than homogeneous ones (even ones that are **on average** marginally better) and the framework presented here can quantify exactly how buffered real animals are from hostile environments. 
+
+It is worth asking, whether the flexibility of the niche in these extra dimensions is enough to have an impact on population ranges and extinction probabilities. The simple sparrow example above indicates that it is, by demonstrating measurable impacts on the volume of the niche, under even the most slight deviations from Hutchinson's definition of dimensionality. Given that the framework presented here for the estimation of fundamental niches is very new, it is not yet clear what proportion of the apparent uncertainty characterizing these estimates in real systems will be due to dimensionality versus sources of noise. However, it is possible that if we model the niche in its full complexity, it may prove to be more deterministic (hence, predictable) than we might conclude by working purely with its low-dimensional projections, a situation echoed in other areas of dynamical systems science [@Farmer1983]. 
+
+
+## The multiplicity of realized niches is a blessing, not a curse
+It is true that the fundamental niche of a species cannot be estimated from a single snapshot of its population distribution i.e., from a single realized niche [@Mcinerny2012a; @Angilletta2019]. It is also true that the uncritical pooling of spatial data will lead to biased representations of the niche [@Pulliam2000; @Godsoe2010a; @Soberon2005; @Jimenez-Valverde2008; @Colwell2009; @Peterson2011]. However, multiple realized niches, when treated as sampling instances in formal statistical estimation, allow the partly obscured picture of the fundamental niche to be assembled from different viewpoints. This process of reconstructing a latent object from its partial reflections is no different to any other estimation problem in the sciences [see discussion in @Godsoe2010a]. 
+
+The above synthesis shows how to formulate the fundamental niche mathematically in a way that allows its empirical estimation from distributional and population growth data collected in multiple realized niches. The key to achieving this is to treat the multiplicity of realized niches as an inferential strength, rather than a nuisance. In this way, the niche object, estimated from case studies such as the sparrow example, is an approximation of the species' fundamental niche that will asymptotically improve as more (contemporary and historical) data from the worldwide range of a species are included in the modeling. The rate at which this approximation converges with diverse data, for different taxa, is an important future research question. It might be argued that presence-only models of the niche [e.g., @Hirzel2003; @Thuiller2004; @Rotenberry2006; @Broennimann2012; @Drake2019] share such an asymptotic convergence to the fundamental niche because as ever-more presence-only data are pooled into these analyses, we map out more of the niche space. However, there are some critical statistical requirements that are not satisfied by presence-only models. The above synthesis of the extensive niche literature hints at four such key requirements, that should be met in any future statistical model of the fundamental niche: 
+
+1) Combination of spatial distribution *and* population growth or demographic data, ideally as part of simultaneous model fitting; 
+2) Integration of data from multiple instances, across a wide range of habitat availability and population density scenarios, that acknowledge the availability composition of each scenario and the possible imbalances in sample size between scenarios; 
+3) Accounting for density-dependent effects (on both population growth and distribution) at the model fitting stage, even if the subsequent calculation of the niche is done by setting population densities close to zero;
+4) Separation of the habitat fitness and habitat selection coefficients (i.e., the distinction between the betas in eq.(\ref{eq:FitnessPredictor}) and the gammas in eq.(\ref{eq:HSFPredictor})). This current confounding between fitness and selection in our niche-related models is a source of much confusion and prediction bias. 
+
+These principles are also direct consequences of the dominant formalization of niche theory, the BAM diagram of @Soberon2005 and @Soberon2007. They refer mostly to how we capitalize on our existing species distribution data and models, that have served as the bedrock for the ideas in this paper and the majority of niche-related empirical models. However, the approach is not incompatible with other sources of information about the fundamental niche. It has previously been argued [e.g., @Jimenez2019] that estimation of fundamental niches can only be approached by models of biophysical first principles [e.g., @Kearney2004] or via experimental methods [e.g., @Colwell1975]. The multiplicity of realized niches offers us a third route to statistical estimation of the fundamental niche, that is entirely complementary to the information contained in experimental data and first principles. For example, experimental data on species distributions may be equivalent to sampling instances whose habitat availabilities are controlled or simplified (e.g., by creating homogeneity in habitats along one or more dimensions of niche space). Such experimental data could be analyzed together with field data, offering important anchor points for the model to tie onto. Mechanistic principles are an even more fruitful source of biological realism, so I will discuss them below as as an important extension to the present framework (see Section 13.1. *Mechanistic content of models leading to the niche*).
+
+
+## The only thing constant is change - but not all change should affect the fundamental niche
+One of the key assumptions of models for the fundamental niche is that it is a stationary characteristic of a species [@Pearman2008; @Nogues-Bravo2009; @Holt2009]. We often imagine that the same fundamental, unchanging rules, merely express themselves differently in different environments, presenting us with different realized niches. This stationarity assumption is convenient, because it allows us to extend the predictive reach of our models into new environments, but it is rarely true [@Cassini2011]. It is therefore important to identify the different sources of change in ecosystems and to consider how they might relate to the validity of the stationary niche ideal.
+
+First, there is environmental change, resulting either from temporal trends, or from looking at a species at different places, with different habitat availability profiles. The statistical approach discussed throughout this monograph, and the distilled principles of niche-related inference discussed in Section 12.4, are designed to ensure that the estimated parameters of fitness (and the subsequent estimates of the niche) are unaffected by such changes.
+
+Second, there are intrinsic sources of change, due to population dynamics. It makes biological sense that the fitness of individuals and their use of habitats will be affected by population density [@Fretwell1969; @Rosenzweig1991; @Boyce2015; @McLoughlin2010; @Cassini2011]. Indeed, taking population dynamics into consideration has been shown to improve the predictions of species distribution models [@Pagel2011; @Matthiopoulos2015], and, once again, the fitness parameters in the framework developed here are designed to be invariant under population change. 
+
+Ostensibly, a rather difficult situation occurs when both density and the environment are changing. This scenario coincides with one of the preeminent areas of application of SDMs, in invasive species and more generally in range dynamics [@Allouche2008; @Gallien2010; @Schurr2012; @Pagel2011], when zones in the range of a species are experiencing new habitat compositions at the same time as undergoing transient population dynamics. Once again, a niche model that accounts for multiple environments and gradations in density can deal with both these problems simultaneously. Related to range dynamics is the broader problem of dispersal effects on niche models. An unsuitable region (sink) may keep getting colonized by nearby thriving populations (sources), and counter-intuitively, under certain scenarios of connectivity, sinks may appear to be more densely populated than sources [@Hanski1997]. Conversely, a suitable region may be as-yet uncolonized because there are no nearby sources. These consequences of dynamic dispersal processes can confuse our models of fundamental niche [@Pulliam2000], but rather than allowing them to affect the estimates of the niche, we must allow our models to incorporate the spatial context of transient dispersal processes [@Schurr2012].
+
+The third source of change comes from dynamic interactions with resources or other species in the ecosystem. Depletion and multispecies dynamics are rarely considered in fundamental niche models, despite the recognition of their importance [@Godsoe2012] and the fact that the alternative concepts of Eltonian and Grinellian niches place the emphasis firmly on community interactions [@Soberon2007]. This unification of the niche concepts is currently at the the frontier of ecological research (see Section 13.1.). 
+
+The fourth source of change is evolution. Over sufficiently long time periods, populations will change, causing their fundamental niche to drift [@Pearman2008]. The volatility in the evolutionary dynamics of the fundamental niche may not be matched by the dynamics in realized niches [@Colwell2009]. Measures of genetic dissimilarity between sub-populations, as well as measures of within-population individual variation will become particularly valuable when trying to apportion changing distributions to environmental versus evolutionary change. Longer-term, there might be scope for modeling the feedback loops between the habitats that organisms are exposed to today and the habitats that they will intrinsically find suitable tomorrow, as a result of adaptation (See Section 13.1.).
+
+Explaining all of the variation we see between realized niches as the result of changes in the fundamental niche is clearly undesirable. For the sake of transferability [@Yates2018], the key practical contribution of the fundamental niche will be to quantify the invariant core of a species, at least, at some point of its evolution. In this section, I have argued that, under the present framework, at least two sources of change (environmental and population dynamics) will leave the estimates of the niche unaffected. The other two sources (community and evolutionary dynamics) still need to be controlled for, by extending the framework. These, and other future extensions are considered next. 
+
+
+# Future developments
+The semantics of niche theory challenge our ecological intuition [@Warren2013] and we still have some way to go in incorporating key biological features, such as dispersal limitation, evolutionary insights, and transferable, quantitative predictions for the composition of real communities [@Chase2016a]. However, the foundations reviewed and synthesized in this monograph are solid, and developments need to happen in the three crucial areas of mechanistic modeling, statistical inference and ecological application.
+
+## Mechanistic content of models leading to the niche
+Mismatches between our estimates of the fundamental niche and empirical species distributions are likely to be caused by biological mechanisms that are not included in the estimation process [@Pulliam2000; @Hargreaves2014]. These could involve physiology, behavior, density dependence, dispersal, individual variation and multispecies interactions.
+
+Physiological constants, metabolic conversion efficiencies, allometric scalars and conservation of mass/energy principles can all be used to constrain the parameters and functional form of niche models [@Kearney2004; @Kearney2008; @Kearney2010]. Furthermore, interactions between resources in how they impact the fitness of a species can benefit from the extensive literature on complementarity and substitutability [@Tilman1980]. 
+
+Behavioral patterns in selectivity and movement are captured, to an extent, by the incorporation of mobility and habitat selection in the framework presented here. However, long-range regular migrations or complex accessibility constraints such as those caused by sea currents/wind fields [@Weimerskirch2012] or landscape resistance mechanisms [@Beyer2016] could still bias the niche parameter estimates.
+
+Density dependence originating from crowding is captured by the present framework [@Matthiopoulos2015] by incorporating attrition onto fitness as a result of conspecific density. However, Allee effects [@Courchamp1999] at low densities are not, and these remain an important future addition [@Holt2004; @Holt2009].
+
+Dispersal processes are relevant because of two key assumptions about the niche (used in Section 3). First, the fundamental niche must contain environments of non-negative population growth, irrespective of whether these environments are accessible via dispersal from the species' current range (e.g., as identified in the BAM diagram of @Soberon2005; @Soberon2010). Second, the niche must exclude instances of apparently positive population growth achieved via supplements from source habitats [@Pulliam2000]. Real populations from which our data are likely to originate are affected by these transient or permanent complications relating to dispersal. Therefore, proximity to donor populations, at distances larger than the typical home-ranging movement of individuals needs to inform the existence and growth rate of focal populations. 
+ 
+A further important extension of the present framework would be the inclusion of individual variation [@Angilletta2019]. Much of the material presented here was developed for populations or species, but has continuously referred to the mobility and behavior of "typical" individuals [@Holt2009]. Therefore, any predictions from these models do not capture potential phenotypic variation that could, in principle, characterize each individual by its own, fundamental niche. This hierarchy of fundamental niches [@Holt2009], from individuals [@Carlson2021], to populations, to entire species has important implications for our understanding of evolutionary processes [@Carscadden2020] in dynamic landscapes. Versions of the framework presented here, extended to include individual variation, are entirely feasible, given the computational efficiency of the calculations involved and a good understanding of evolutionary processes at the level of species-habitat-associations can only benefit from knowledge of the shape and properties of the fundamental niche [@Soberon2020].
+
+
+Increasing the mechanistic content of the models presented here could also deal with a closely related limitation of Hutchinson's fundamental niche [@Mcinerny2012b], its apparent inability to capture interspecific interactions such as predation, mutualism or competition. Perhaps the boldest simplification of Hutchinson's theory of fundamental niches was to ignore multispecies interactions [occasionally distinguishing between pre-interaction and post-interaction niches - @Colwell2009]. Certainly, examining species in isolation is a valid starting point for developing theory [@Roughgarden1974], but the fall-from-grace of niche concepts from the 1980s onward [@Colwell2009; @Sales2021] was associated with the realization of the importance of species interactions [@Rosenzweig1985; @Rosenzweig1991] in shaping population sizes and distributions [@Colwell2009].
+
+These considerations require us to think of the niche in more dynamic terms [@Soberon2014; @Chase2003; @Schurr2012; @ParentoniMartins2017], driven by bionomic, and not just scenopoetic variables. Potentially, we may arrive at a mathematical formulation that hybridizes the Grinellian & Eltonian ideas of the niche as a *role in the ecological community* with the Hutchinsonian idea of the niche as a *volume in E-space* [@Mcinerny2012b; @Chase2003; @Peterson2011]. 
+
+Such a formulation would capture dynamical interactions by including other species (prey, predators, competitors) as additional dimensions of *E*-space [@Whittaker1973; @Pulliam2000; @Godsoe2017], an idea that may not have universal appeal because it integrates the niche with its community context. However, as shown here, it is both possible, and necessary to formulate the fundamental niche in a context-dependent way, as long as the space of possibilities is sufficiently high-dimensional to capture all possible contexts. Indeed, the idea of simultaneous modeling of the niches and distributions of multiple interacting species is already two decades old [@Guisan2000] and rapidly gaining momentum [@Kissling2012; @Godsoe2017; @Ovaskainen2020]. These emerging and exciting multivariate frameworks already have at their core a working definition of the niche, which has yet to satisfy the stationarity properties of the fundamental niche (see Section 12.5). The work presented here can move that definition more towards the assumption of stationarity.
+
+
+## Data requirements and statistical inference
+The synthesis presented here attempts to bridge the gap between fitness models and distribution data. This convergence between mechanism and inference requires us to ask how feasible the data requirements are, how achievable the model fitting is, and how it can attain precision and minimize bias. I consider these questions in turn. 
+
+On the question of data requirements, the proposed approach (and, in particular, the separation of fitness parameters from distribution parameters, the increase in the dimensionality of the niche space and the acknowledgment of functional responses in habitat selection) causes a necessary increase in the number of parameters required by the fundamental niche model. compared to a typical SDM. The general rules for data adequacy are to obtain 1) species distribution data from multiple, diverse environmental scenarios where 2) the environmental variables are known at a resolution relevant to the behavioral process of selection by the study animals and where 3) for some of these sampling instances there are accompanying data on population growth. These are not difficult requirements for a great many species. For instance, for the sparrow example in Section 11, a postgraduate student collected in-situ observations of sparrow usage, during a summer project, from 1280 distinct spatial locations within suburban gardens and matched those to garden composition using Google Earth imagery. A total of 32 sparrow colonies were included in the study. For 12 focal sparrow colonies, baseline population surveys were available from a citizen science programme, the Glasgow House Sparrow Project, part of a partnership between the Royal Society for the Protection of Birds (RSPB) and the University of Glasgow. The explanatory and predictive power of the model fitted to these data were characteristically high [@Matthiopoulos2019] despite the modest data collection effort. 
+
+On the question of fitting methods for incrementally mechanistic models. Current mechanistic approaches propose to build fundamental niches from the ground up, using only biological first principles. The advantage of mechanistic models is in their ability to define the qualitative, quantitative and interactional relationship between fitness and the environmental variables [@Kearney2010]. Mechanistic principles transcend the range of observed environments and realized niches, so they promise to increase the transferability of niche models [@Bolker2008; @Mouquet2015; @Yates2018]. On the other hand, the emphasis on mechanism faces the challenges of reductionism [@Holt2009; @Mcinerny2012a; @Schurr2012; @Peterson2015] and currently seems restricted to capturing well-understood and univariate physiological tolerances (e.g., thermal envelopes).
+
+Nevertheless, statistical analyses of the niche cannot go far without biological mechanism [@Mcinerny2012a]. For example, above I have argued that spatial data cannot estimate the niche without information on population growth, density dependence and demography [@Aldridge2008; @DeCesare2014; @Pagel2011; @Schurr2012; @Matthiopoulos2015]. Equally, it seems foolhardy to attempt predictions of species realized niches, based purely on mechanistic models, without fitting them to distribution data [@Peterson2015]. Therefore, a reconciliation between mechanistic and correlational models is necessary.
+
+Although, the distinction between these two types of models is made quite often in the modern niche literature [@Kearney2009;@Kearney2010; @Gallien2010; @Peterson2015; @Yates2018] the separation is not unequivocal. In reality, no model is purely mechanistic and almost every model (apart from the simplest forms of statistical regression) will be a hybrid of some sort. I outline here four routes to increasing the mechanistic content of niche models while retaining their link to SDMs.
+
+First, many mechanistic principles can be satisfied using very rudimentary mathematical forms that are regularly used by most correlational models. Within a linear predictor (e.g., eq. (\ref{eq:FitnessPredictor}) above), monotonic forms can describe risks and resources, quadratic forms can describe conditions, and interactions can describe substitutable, antagonistic and complementary environmental variables [Chapter 2, in @Matthiopoulos2020b]. It may therefore be that even the existing correlational models described in this paper offer us considerable mechanistic control.
+
+Second, extending correlational models to afford more user-control regarding parameters (e.g., by using informative priors in a Bayesian setting, or constrained regression in a likelihood setting) would allow the incorporation of known biological first principles and quantitative knowledge on fitness-covariate relations and interactive effects [@Jimenez2019]. 
+
+Third, when more complicated relationships are involved so that environmental covariates have cumulative, delayed, or saturating effects on species fitness and distribution [@Kearney2010], the use of mechanistic models may inform us about appropriate nonlinear empirical functions that can be used to approximate the behavior of mechanisms. 
+
+Fourth, when existing or approximate mathematical models cannot be used, it is increasingly possible to fit mechanistic models directly to data [@Mouquet2015].
+
+Such flexible modelling approaches also bear relevance to the question of precision. As we move towards the use of integrated modelling in ecology [@Kindsvater2018; @Yen2019], it becomes possible and valuable to draw joint inferences from spatial and population data. Simultaneous model fitting to these different data types permits information to flow in both directions (i.e., from the species distribution model to the population model and vice-versa) and it also allows the correct propagation of errors through the different stages of analysis. Hence, acknowledging the correlations between parameters in the model can avoid the unnecessary compounding of errors at the cost of estimation and prediction precision. 
+
+On the question of bias. Although the definition of the fundamental niche considers small and isolated populations of identical individuals that are unaffected by interactions with other species, the data on which these models are fitted are almost certain to be affected by these processes. When this happens, the parameters of the niche model will suffer from bias. So, the recognition and gradual incorporation of the mechanisms described in Section 13.1. is a necessary route to progress. 
+
+## Optimizing ecosystem management
+Niches that exist in tens or hundreds of dimensions are hard to visualize, but having a compact and numerically efficient expression that describes the boundary of the niche is arguably more useful than visualizing it, because it allows us to identify viable environments [@Godsoe2010a] and to manage land cover so as to optimize population viability. By subtly modulating the availability and heterogeneity of environmental variables, this framework allows us to engineer viability for a species where there previously may have been none [Fig. 4, in @Matthiopoulos2019]. As Fig. \@ref(fig:Espace) illustrates, we can do this without necessarily changing the overall proportions of habitats in a landscape, by merely re-arranging them spatially. The vast body of literature on metapopulations and habitat fragmentation [@Hanski1997] bears witness to this principle. Given the reality of conflicts between conservation, resource/pest management, wealth creation, food security and complex ecosystem dynamics, where the overall amounts of land cover for each activity are often fixed [@Phalan2011], achieving such accurate mitigation via landscape management [@Sayer2013] will prove invaluable in the future. We are in a good position to achieve this, because ecological thinking and computer algorithms on spatial prioritization have been advancing for decades [@Moilanen2008]. Niche theory now needs to provide that research community with objective functions for fitness, habitat suitability and critical habitats.
+
+
+
+# Conclusion
+As ecology is moving towards transferable models of population viability and distribution [@Leibold2008; @Yates2018; @Araujo2006], the fundamental niche is an indispensable concept [@Warren2012; @Soberon2014]. The niche must be pattern- and data-driven [@Schurr2012; @Warren2012], but it must be rooted in ecological principles and applied imperatives [@Mcinerny2012c]. I have argued for the use of hybrid [@Mcinerny2012b] correlational-mechanistic approaches [@Kearney2004; @Schurr2012], that bring to the fore issues of population growth, transient dynamics, resource depletion and inter-specific interactions. Taking environmental heterogeneity and phenotypic plasticity [@Angilletta2019] into account has led to a re-evaluation of the complexity of the fundamental niche, a route towards its evolution as a concept, rather than its abandonment. My early results on the malleability of Hutchinson's fundamental niche carry optimistic messages about the resilience of animal species to anthropogenic change and the available room for maneuver in mitigating human-wildlife conflicts.
+
+# Acknowledgments
+Earier drafts benefited from feedback by Daniel Haydon, Fergus Chadwick, Andrew Seaton, John Fieberg, John Harwood, Geert Aarts, Ewan Wakefield, Neil Metcalfe, Robert Moss, Nick Hanley, Luke Powell, Pat Monaghan, Ross MacLeod, Rod Page. The IBAHCM provided the academic environment and time that made this work possible. I am grateful to William Godsoe for his review and vital follow-up correspondence, as well as to an anonymous reviewer.
+
+# References
+
+
+
+
+
